@@ -7,7 +7,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Separator } from './ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
-import { AlertCircle, TrendingUp, TrendingDown, Download, Trash2, Users, Clock, MousePointer, AlertTriangle, Smile, Target, Zap, Search, Lightbulb, Shield, CheckCircle2, XCircle, Eye, ThumbsUp, Brain, Navigation, Activity, FileText, Table, Info, Cloud, RefreshCw, Upload, Video, FileText as FileTextIcon, Play, Plus, X as XIcon, ArrowRight, ChevronDown } from 'lucide-react';
+import { AlertCircle, TrendingUp, TrendingDown, Download, Trash2, Users, Clock, MousePointer, AlertTriangle, Smile, Target, Zap, Search, Lightbulb, Shield, CheckCircle2, XCircle, Eye, ThumbsUp, Brain, Navigation, Activity, FileText, Table, Info, Cloud, RefreshCw, Upload, Video, FileText as FileTextIcon, Play, Plus, X as XIcon, ArrowRight, ChevronDown, Sparkles } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { AliviaLogo } from './AliviaLogo';
@@ -40,6 +40,8 @@ interface TaskResult {
   searchMethod?: string[]; // Sélection multiple
   // Métrique numérique (échelle 1-10)
   ease?: number; // Facilité - collectée uniquement pour tâches 2-8
+  valuePropositionClarity?: number; // Compréhension d'Alivia - collectée uniquement pour tâche 1 (Phase de découverte)
+  firstImpression?: number; // Premières impressions - collectée uniquement pour tâche 1 (Phase de découverte)
   // Champs texte
   notes: string;
   taskVerbatimsPositive?: string;
@@ -76,7 +78,9 @@ interface TestSession {
 // Traductions et icônes des métriques NUMÉRIQUES (échelles 1-10)
 // Note : Ne conserver QUE les métriques numériques collectées via Slider
 const metricConfig: Record<string, { label: string; icon: any }> = {
-  ease: { label: 'Facilité', icon: ThumbsUp }
+  ease: { label: 'Facilité', icon: ThumbsUp },
+  valuePropositionClarity: { label: 'Compréhension d\'Alivia', icon: Lightbulb },
+  firstImpression: { label: 'Premières impressions', icon: Sparkles }
 };
 
 const categoricalConfig: Record<string, { label: string; icon: any }> = {
@@ -204,6 +208,39 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       // Sync with Supabase on load
       const syncedSessions = await syncWithSupabase();
       console.log('📥 Sessions chargées depuis Supabase:', syncedSessions.length, 'sessions');
+      
+      // 🔧 MIGRATION: Nettoyer les données des sessions existantes
+      const migratedSessions = syncedSessions.map(session => ({
+        ...session,
+        tasks: session.tasks.map(task => {
+          const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
+          const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
+          const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+          
+          // Nettoyer les métriques incorrectes
+          const cleanedTask = { ...task };
+          
+          // Pour la tâche Découverte : supprimer ease, garder valuePropositionClarity et firstImpression
+          if (isDiscovery) {
+            delete cleanedTask.ease;
+            delete cleanedTask.duration;
+            delete cleanedTask.autonomy;
+            delete cleanedTask.pathFluidity;
+          }
+          // Pour Questions Post-Test et bonus : supprimer ease
+          else if (isPostTest || isBonus) {
+            delete cleanedTask.ease;
+          }
+          // Pour les tâches standards : supprimer valuePropositionClarity et firstImpression
+          else {
+            delete cleanedTask.valuePropositionClarity;
+            delete cleanedTask.firstImpression;
+          }
+          
+          return cleanedTask;
+        })
+      }));
+      
       syncedSessions.forEach((s, idx) => {
         console.log(`Session ${idx + 1}:`, {
           id: s.id,
@@ -213,7 +250,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           tasksIds: s.tasks?.map(t => t.taskId) || []
         });
       });
-      setSessions(syncedSessions);
+      setSessions(migratedSessions);
     } catch (error) {
       console.error('Error loading sessions:', error);
       // Fallback to localStorage
@@ -231,6 +268,33 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     try {
       const syncedSessions = await syncWithSupabase();
       console.log('🔄 Synchronisation manuelle - Sessions récupérées:', syncedSessions.length);
+      
+      // 🔧 MIGRATION: Nettoyer les données des sessions existantes
+      const migratedSessions = syncedSessions.map(session => ({
+        ...session,
+        tasks: session.tasks.map(task => {
+          const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
+          const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
+          const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+          
+          const cleanedTask = { ...task };
+          
+          if (isDiscovery) {
+            delete cleanedTask.ease;
+            delete cleanedTask.duration;
+            delete cleanedTask.autonomy;
+            delete cleanedTask.pathFluidity;
+          } else if (isPostTest || isBonus) {
+            delete cleanedTask.ease;
+          } else {
+            delete cleanedTask.valuePropositionClarity;
+            delete cleanedTask.firstImpression;
+          }
+          
+          return cleanedTask;
+        })
+      }));
+      
       syncedSessions.forEach((s, idx) => {
         console.log(`Session ${idx + 1}:`, {
           id: s.id,
@@ -239,7 +303,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           nbTasks: s.tasks?.length || 0
         });
       });
-      setSessions(syncedSessions);
+      setSessions(migratedSessions);
       toast.success('Synchronisation réussie avec le cloud ☁️');
     } catch (error) {
       console.error('Error syncing sessions:', error);
@@ -485,10 +549,11 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         task.emotionalReaction ? emotionalReactionLabels[task.emotionalReaction] || task.emotionalReaction : '',
         task.searchMethod && task.searchMethod.length > 0 ? task.searchMethod.map(m => searchMethodLabels[m] || m).join(', ') : '',
         ...Object.keys(metricConfig).map(key => {
-          // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
-          const isTaskToExclude = task.taskId === 1 || task.taskId === 10;
+          // La métrique "ease" (Facilité) n'est pas collectée pour : Découverte, Questions Post-Test, tâches bonus
+          const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
+          const isDiscovery = task.title?.includes('Découverte');
           const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
-          if (key === 'ease' && (isTaskToExclude || isBonus)) return '';
+          if (key === 'ease' && (isDiscovery || isPostTest || isBonus)) return '';
           return task[key as keyof TaskResult] || '';
         }),
         `"${(task.notes || '').replace(/"/g, '""')}"`,
@@ -597,12 +662,32 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       doc.text(task.success ? 'Réussite' : 'Échec', leftMargin + 3, yPos);
       yPos += 5;
 
-      // Métriques
+      // Métriques numériques (dynamique selon metricConfig)
       const taskMetrics = [];
-      // La métrique "ease" (Facilité) est collectée UNIQUEMENT pour les tâches 2-8 (tâches d'usage)
-      if (task.ease && task.taskId >= 2 && task.taskId <= 8) {
-        taskMetrics.push(`Facilité: ${task.ease}/10`);
-      }
+      Object.keys(metricConfig).forEach(metricKey => {
+        // Détection du type de tâche
+        const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
+        const isDiscovery = task.title?.includes('Découverte');
+        const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+        
+        // Pour la tâche Découverte : afficher seulement valuePropositionClarity et firstImpression
+        if (isDiscovery) {
+          if (metricKey !== 'valuePropositionClarity' && metricKey !== 'firstImpression') return;
+        }
+        // Pour Questions Post-Test et tâches bonus : ne pas afficher ease
+        else if (metricKey === 'ease' && (isPostTest || isBonus)) {
+          return;
+        }
+        // Pour les autres tâches : ne pas afficher valuePropositionClarity et firstImpression
+        else if (metricKey === 'valuePropositionClarity' || metricKey === 'firstImpression') {
+          return;
+        }
+        
+        const value = task[metricKey as keyof TaskResult];
+        if (typeof value === 'number') {
+          taskMetrics.push(`${metricConfig[metricKey].label}: ${value}/10`);
+        }
+      });
 
       if (taskMetrics.length > 0) {
         doc.setTextColor(100, 100, 100);
@@ -774,10 +859,23 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         // Métriques numériques (dynamique selon metricConfig)
         const taskMetrics = [];
         Object.keys(metricConfig).forEach(metricKey => {
-          // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
-          const isTaskToExclude = task.taskId === 1 || task.taskId === 10;
+          // Détection du type de tâche
+          const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
+          const isDiscovery = task.title?.includes('Découverte');
           const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
-          if (metricKey === 'ease' && (isTaskToExclude || isBonus)) return;
+          
+          // Pour la tâche Découverte : afficher seulement valuePropositionClarity et firstImpression
+          if (isDiscovery) {
+            if (metricKey !== 'valuePropositionClarity' && metricKey !== 'firstImpression') return;
+          }
+          // Pour Questions Post-Test et tâches bonus : ne pas afficher ease
+          else if (metricKey === 'ease' && (isPostTest || isBonus)) {
+            return;
+          }
+          // Pour les autres tâches : ne pas afficher valuePropositionClarity et firstImpression
+          else if (metricKey === 'valuePropositionClarity' || metricKey === 'firstImpression') {
+            return;
+          }
           
           const value = task[metricKey as keyof TaskResult];
           if (typeof value === 'number') {
@@ -872,18 +970,12 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     
     const availableMetrics = getAvailableMetrics();
     
-    // ====== TAUX DE RÉUSSITE ======
-    // IMPORTANT : Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test)
-    // Car ce sont des tâches spéciales qui ne sont pas des "tâches d'usage" standard
-    const tasksForSuccessRate = allTasks.filter(t => t.taskId !== 1 && t.taskId !== 10);
-    const successRate = tasksForSuccessRate.length > 0 
-      ? (tasksForSuccessRate.filter(t => t.success).length / tasksForSuccessRate.length) * 100 
-      : 0;
-    console.log('✅ Taux de réussite:', successRate.toFixed(1) + '%', `(${tasksForSuccessRate.filter(t => t.success).length}/${tasksForSuccessRate.length})`);
+    const successRate = allTasks.length > 0 ? (allTasks.filter(t => t.success).length / allTasks.length) * 100 : 0;
+    console.log('✅ Taux de réussite:', successRate.toFixed(1) + '%', `(${allTasks.filter(t => t.success).length}/${allTasks.length})`);
 
-    // ====== TAUX D'AUTONOMIE ======
-    // Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test) qui n'ont pas ces métriques
-    const tasksWithAutonomy = allTasks.filter(t => t.taskId !== 1 && t.taskId !== 10 && t.autonomy !== undefined && t.autonomy !== '' && t.autonomy !== null);
+    // Calcul du taux d'autonomie
+    // Exclure la tâche 1 (Phase de découverte) qui n'a pas ces métriques
+    const tasksWithAutonomy = allTasks.filter(t => t.taskId !== 1 && t.autonomy !== undefined && t.autonomy !== '' && t.autonomy !== null);
     console.log('🔍 Autonomie - Tâches avec valeur d\'autonomie:', tasksWithAutonomy.map(t => ({ id: t.taskId, title: t.title, autonomy: t.autonomy })));
     
     const aloneCount = tasksWithAutonomy.filter(t => t.autonomy === 'autonomous').length;
@@ -908,16 +1000,26 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       console.log(`📊 Métrique "${metric}" - Tâches avec valeur avant filtrage:`, tasksWithMetric.length);
       
       // La métrique "ease" (Facilité) est collectée UNIQUEMENT pour les tâches d'usage standard
-      // Exclure : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), et tâches bonus
+      // Exclure : Découverte, Questions Post-Test, et tâches bonus
       if (metric === 'ease') {
         console.log(`   Tâches avant filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
         tasksWithMetric = tasksWithMetric.filter(t => {
-          // Filtrer par ID (plus fiable que par titre)
-          const isTaskToExclude = t.taskId === 1 || t.taskId === 10;
+          const isPostTest = t.title === 'Questions Post-Test' || t.title?.includes('Questions Post-Test');
+          const isDiscovery = t.taskId === 1 || t.title?.includes('Découverte');
           const isBonus = t.title?.includes('Créer un assistant') || t.title?.includes('BONUS');
-          return !isTaskToExclude && !isBonus;
+          return !isPostTest && !isDiscovery && !isBonus;
         });
         console.log(`   Tâches après filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
+      }
+      
+      // Les métriques "valuePropositionClarity" et "firstImpression" sont collectées UNIQUEMENT pour la tâche Découverte
+      if (metric === 'valuePropositionClarity' || metric === 'firstImpression') {
+        console.log(`   Tâches avant filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, [metric]: t[metric as keyof TaskResult] })));
+        tasksWithMetric = tasksWithMetric.filter(t => {
+          const isDiscovery = t.taskId === 1 || t.title?.includes('Découverte');
+          return isDiscovery;
+        });
+        console.log(`   Tâches après filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, [metric]: t[metric as keyof TaskResult] })));
       }
       
       if (tasksWithMetric.length > 0) {
@@ -941,9 +1043,8 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       // Ne pas filtrer par availableMetrics - vérifier directement
       let tasksWithMetric = allTasks.filter(t => {
         const value = t[metric as keyof TaskResult];
-        // Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test) 
-        // pour duration, autonomy, pathFluidity, emotionalReaction
-        if (['duration', 'autonomy', 'pathFluidity', 'emotionalReaction'].includes(metric) && (t.taskId === 1 || t.taskId === 10)) {
+        // Exclure la tâche 1 (Phase de découverte) pour duration, autonomy, pathFluidity
+        if (['duration', 'autonomy', 'pathFluidity'].includes(metric) && t.taskId === 1) {
           return false;
         }
         return value !== undefined && value !== null && value !== '';
@@ -992,11 +1093,23 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
 
       // Ajout des métriques numériques disponibles pour cette tâche
       numericalMetricKeys.forEach(metric => {
-        // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
         const taskTitle = taskResults[0]?.title || '';
-        const isTaskToExclude = taskId === 1 || taskId === 10;
+        const isPostTest = taskTitle === 'Questions Post-Test' || taskTitle.includes('Questions Post-Test');
+        const isDiscovery = taskTitle.includes('Découverte');
         const isBonus = taskTitle.includes('Créer un assistant') || taskTitle.includes('BONUS');
-        if (metric === 'ease' && (isTaskToExclude || isBonus)) {
+        
+        // Pour la tâche Découverte : calculer seulement valuePropositionClarity et firstImpression
+        if (isDiscovery) {
+          if (metric !== 'valuePropositionClarity' && metric !== 'firstImpression') {
+            return;
+          }
+        }
+        // Pour Questions Post-Test et tâches bonus : ne pas calculer ease
+        else if (metric === 'ease' && (isPostTest || isBonus)) {
+          return;
+        }
+        // Pour les autres tâches : ne pas calculer valuePropositionClarity et firstImpression
+        else if (metric === 'valuePropositionClarity' || metric === 'firstImpression') {
           return;
         }
         
@@ -1008,13 +1121,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
 
       // Ajout des métriques catégorielles pour cette tâche
       categoricalMetrics.forEach(metric => {
-        // Exclure la tâche 1 et la tâche 10 pour certaines métriques
-        let tasksWithMetric = taskResults.filter(t => t[metric as keyof TaskResult] !== undefined && t[metric as keyof TaskResult] !== null && t[metric as keyof TaskResult] !== '');
-        
-        // Ces métriques ne s'appliquent pas à la tâche 1 (Découverte) ni à la tâche 10 (Questions Post-Test)
-        if (['duration', 'autonomy', 'pathFluidity', 'emotionalReaction'].includes(metric) && (taskId === 1 || taskId === 10)) {
-          return;
-        }
+        const tasksWithMetric = taskResults.filter(t => t[metric as keyof TaskResult] !== undefined && t[metric as keyof TaskResult] !== null && t[metric as keyof TaskResult] !== '');
         if (tasksWithMetric.length > 0) {
           const distribution: Record<string, number> = {};
           tasksWithMetric.forEach(t => {
@@ -1563,22 +1670,22 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                     const minimalHelp = stats.categoricalStats.autonomy['minimal-help'] || 0;
                     const guided = stats.categoricalStats.autonomy['guided'] || 0;
                     const blocked = stats.categoricalStats.autonomy['blocked'] || 0;
-                    const autonomousRate = (autonomous / total) * 100;
+                    const aloneRate = ((autonomous + minimalHelp) / total) * 100;
                     
-                    if (autonomousRate >= 70) {
+                    if (aloneRate >= 70) {
                       insights.push({
                         type: 'success',
                         icon: Zap,
                         title: 'Excellente autonomie',
-                        message: `${autonomousRate.toFixed(0)}% des tâches réussies sans aide (${autonomous}/${total})`,
+                        message: `${aloneRate.toFixed(0)}% des tâches réussies sans ou avec peu d'aide (${autonomous + minimalHelp}/${total})`,
                         recommendation: 'Les utilisateurs naviguent intuitivement. Maintenez cette clarté dans les futures fonctionnalités.'
                       });
-                    } else if (autonomousRate < 50) {
+                    } else if (aloneRate < 50) {
                       insights.push({
                         type: 'alert',
                         icon: AlertTriangle,
                         title: 'Aide fréquemment nécessaire',
-                        message: `Seulement ${autonomousRate.toFixed(0)}% d'autonomie (${minimalHelp + guided} avec aide, ${blocked} bloqués)`,
+                        message: `Seulement ${aloneRate.toFixed(0)}% d'autonomie (${guided} guidés, ${blocked} bloqués)`,
                         recommendation: 'URGENT : Ajouter des tooltips contextuels, simplifier les parcours et renforcer l\'onboarding.'
                       });
                     } else {
@@ -1586,7 +1693,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         type: 'warning',
                         icon: Zap,
                         title: 'Autonomie moyenne',
-                        message: `${autonomousRate.toFixed(0)}% d'autonomie - ${minimalHelp + guided} utilisateurs ont besoin d'indices`,
+                        message: `${aloneRate.toFixed(0)}% d'autonomie - ${guided + blocked} utilisateurs ont eu besoin d'aide`,
                         recommendation: 'Ajoutez des messages d\'aide inline et des exemples concrets pour guider les utilisateurs.'
                       });
                     }
@@ -1865,10 +1972,10 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                       {/* Autonomie */}
                       {stats.categoricalStats.autonomy && (() => {
                         const COLORS = {
-                          'autonomous': 'var(--success)',
-                          'minimal-help': 'var(--warning)',
-                          'guided': '#FF9800',
-                          'blocked': 'var(--destructive)'
+                          'alone': 'var(--success)',
+                          'hints': 'var(--warning)',
+                          'with-help': '#FF9800',
+                          'failed': 'var(--destructive)'
                         };
                         const data = Object.entries(stats.categoricalStats.autonomy).map(([key, count]) => {
                           const total = Object.values(stats.categoricalStats.autonomy).reduce((sum, c) => sum + c, 0);
@@ -2168,7 +2275,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                     ).length;
                     
                     const needsHelpCount = taskFeedbacks.filter(t => 
-                      t.autonomy === 'minimal-help' || t.autonomy === 'guided' || t.autonomy === 'blocked'
+                      t.autonomy === 'with-help' || t.autonomy === 'failed'
                     ).length;
 
                     // Tâche avec taux de succès < 50% = Impact élevé
@@ -2462,15 +2569,15 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                           <p className="text-[var(--foreground)] mb-2">Autonomie (valeur dominante) :</p>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--success)]">Totalement autonome</span>
+                              <span className="text-[var(--success)]">Réussi seul</span>
                               <span className="text-[var(--muted-foreground)]">Vert</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--warning)]">Aide minimale</span>
+                              <span className="text-[var(--warning)]">Réussi avec indices</span>
                               <span className="text-[var(--muted-foreground)]">Orange</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--destructive)]">A dû être guidé / Bloqué</span>
+                              <span className="text-[var(--destructive)]">Échec malgré aide</span>
                               <span className="text-[var(--muted-foreground)]">Rouge</span>
                             </div>
                           </div>
@@ -2486,20 +2593,29 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
               {stats.taskStats.map((task: any) => {
                 // Récupérer dynamiquement les métriques numériques disponibles
                 const getAllMetricsInTask = (taskData: any) => {
+                  const taskTitle = taskData.taskTitle || '';
+                  const isPostTest = taskTitle === 'Questions Post-Test' || taskTitle.includes('Questions Post-Test');
+                  const isDiscovery = taskTitle.includes('Découverte');
+                  const isBonus = taskTitle.includes('Créer un assistant') || taskTitle.includes('BONUS');
+                  
                   const allMetricKeys = Object.keys(metricConfig);
                   return allMetricKeys.filter(metricId => {
                     const value = taskData[metricId];
                     if (typeof value !== 'number') return false;
                     
-                    // Exclure "ease" (Facilité) pour : Découverte, Questions Post-Test, tâches bonus
-                    if (metricId === 'ease') {
-                      const taskTitle = taskData.taskTitle || '';
-                      const isPostTest = taskTitle === 'Questions Post-Test' || taskTitle.includes('Questions Post-Test');
-                      const isDiscovery = taskTitle.includes('Découverte');
-                      const isBonus = taskTitle.includes('Créer un assistant') || taskTitle.includes('BONUS');
-                      if (isDiscovery || isPostTest || isBonus) {
-                        return false;
-                      }
+                    // Pour la tâche Découverte : afficher seulement valuePropositionClarity et firstImpression
+                    if (isDiscovery) {
+                      return metricId === 'valuePropositionClarity' || metricId === 'firstImpression';
+                    }
+                    
+                    // Pour Questions Post-Test et tâches bonus : ne pas afficher ease
+                    if (metricId === 'ease' && (isPostTest || isBonus)) {
+                      return false;
+                    }
+                    
+                    // Pour les autres tâches : ne pas afficher valuePropositionClarity et firstImpression
+                    if (metricId === 'valuePropositionClarity' || metricId === 'firstImpression') {
+                      return false;
                     }
                     
                     return true;
@@ -2516,11 +2632,26 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                 
                 const metricsToShow = getAllMetricsInTask(task);
                 
+                // Détection de la tâche de découverte (cohérent avec getAllMetricsInTask)
+                const taskTitle = task.taskTitle || '';
+                const isDiscoveryTask = taskTitle.includes('Découverte');
+                
+                // Log pour debug Phase de découverte
+                if (isDiscoveryTask) {
+                  console.log(`🔍 Phase de découverte détectée:`, {
+                    taskId: task.taskId,
+                    taskTitle: task.taskTitle,
+                    metricsToShow,
+                    valuePropositionClarity: task.valuePropositionClarity,
+                    firstImpression: task.firstImpression
+                  });
+                }
+                
                 // Métriques catégorielles importantes : durée, fluidité et autonomie
-                // Pas de ces métriques pour la tâche 1 (Phase de découverte) ni la tâche 10 (Questions Post-Test)
-                const duration = (task.taskId !== 1 && task.taskId !== 10 && task.duration) ? getDominantValue(task.duration) : null;
-                const pathFluidity = (task.taskId !== 1 && task.taskId !== 10 && task.pathFluidity) ? getDominantValue(task.pathFluidity) : null;
-                const autonomy = (task.taskId !== 1 && task.taskId !== 10 && task.autonomy) ? getDominantValue(task.autonomy) : null;
+                // Pas de ces métriques pour la Phase de découverte
+                const duration = (!isDiscoveryTask && task.duration) ? getDominantValue(task.duration) : null;
+                const pathFluidity = (!isDiscoveryTask && task.pathFluidity) ? getDominantValue(task.pathFluidity) : null;
+                const autonomy = (!isDiscoveryTask && task.autonomy) ? getDominantValue(task.autonomy) : null;
                 
                 // Log pour debug
                 if (task.taskId === 2 || task.taskId === 3) {
@@ -2539,8 +2670,8 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         <span className="text-xs text-[var(--muted-foreground)]">#{task.taskId}</span>
                         <span className="text-[var(--foreground)] truncate">{task.taskTitle}</span>
                       </div>
-                      {/* Pas de taux de réussite pour la tâche 1 (Découverte) ni la tâche 10 (Questions Post-Test) */}
-                      {task.taskId !== 1 && task.taskId !== 10 && (
+                      {/* Pas de taux de réussite pour la Phase de découverte */}
+                      {!isDiscoveryTask && (
                       <Badge 
                         variant={task.successRate >= 80 ? "default" : task.successRate >= 60 ? "secondary" : "destructive"}
                         className={task.successRate >= 80 ? 'bg-[var(--success)] text-[var(--success-foreground)] hover:bg-[var(--success)]' : task.successRate >= 60 ? 'bg-[var(--info)] text-[var(--info-foreground)] hover:bg-[var(--info)]' : ''}
@@ -2600,9 +2731,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                           <span className={`text-xs ${
                             autonomy === 'autonomous' ? 'text-[var(--success)]' :
                             autonomy === 'minimal-help' ? 'text-[var(--warning)]' :
-                            autonomy === 'guided' ? 'text-[var(--destructive)]' :
-                            autonomy === 'blocked' ? 'text-[var(--destructive)]' :
-                            'text-[var(--muted-foreground)]'
+                            'text-[var(--destructive)]'
                           }`}>
                             {autonomyLabels[autonomy] || autonomy}
                           </span>

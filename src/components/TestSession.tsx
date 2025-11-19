@@ -365,6 +365,12 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
 
   function createEmptyResult(task: any): TaskResult {
       if (!task) return {} as any;
+      
+      // Détection du type de tâche pour initialiser les bonnes métriques
+      const isDiscovery = task.id === 1 || task.title?.includes('Découverte');
+      const isPostTest = task.title?.includes('Questions Post-Test');
+      const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+      
       return {
         taskId: task.id,
         title: task.title,
@@ -379,18 +385,20 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         verbatim: '',
         taskVerbatimsPositive: '',
         taskVerbatimsNegative: '',
-        ease: 5,
+        // Ease uniquement pour les tâches 2-8 et 10 (pas découverte, pas post-test, pas bonus si bonus)
+        ease: (!isDiscovery && !isPostTest && !isBonus) ? 5 : undefined,
         searchMethod: [],
         sourcesUnderstanding: 5,
         confidenceLevel: 5,
-        valuePropositionClarity: 5,
-        firstImpression: 5,
+        // Métriques spécifiques à la phase de découverte
+        valuePropositionClarity: isDiscovery ? 5 : undefined,
+        firstImpression: isDiscovery ? 5 : undefined,
         postTestImpression: '',
         postTestLiked: '',
         postTestFrustrations: '',
         postTestDataStorage: '',
         postTestPracticalUse: '',
-        postTestAdoption: 5,
+        postTestAdoption: isPostTest ? 5 : undefined,
         customMetrics: {}
       };
   }
@@ -1188,7 +1196,10 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                        />
                     </div>
 
-                    {/* Standard Ease Metric for tasks 2-10 */}
+                    {/* Standard Ease Metric - UNIQUEMENT pour tâches 2-8 (pas découverte, pas post-test, pas bonus) */}
+                    {currentTaskObj?.id !== 9 && 
+                     !currentTaskObj?.title?.includes('Questions Post-Test') &&
+                     !currentTaskObj?.optional && (
                     <div className="space-y-3 pt-2 border-t border-[var(--border)]">
                       <Label>Facilité</Label>
                       <p className="text-[var(--muted-foreground)]">
@@ -1209,6 +1220,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                         <span>Très facile</span>
                       </div>
                     </div>
+                    )}
                   </>
                 )}
               </>
