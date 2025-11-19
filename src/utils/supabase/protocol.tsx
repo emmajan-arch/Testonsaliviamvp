@@ -71,7 +71,7 @@ export async function getProtocolTimestamp() {
     const data = await response.json();
     return data.timestamp || null;
   } catch (error) {
-    console.error('Erreur getProtocolTimestamp:', error);
+    // Erreur silencieuse - l'application fonctionne en mode local via localStorage
     return null;
   }
 }

@@ -97,9 +97,10 @@ const durationLabels: Record<string, string> = {
 };
 
 const autonomyLabels: Record<string, string> = {
-  'alone': 'Réussi seul',
-  'with-help': 'Réussi avec indices',
-  'failed': 'Échec malgré aide'
+  'autonomous': 'Totalement autonome',
+  'minimal-help': 'Aide minimale',
+  'guided': 'A dû être guidé',
+  'blocked': 'Bloqué sans aide'
 };
 
 const pathFluidityLabels: Record<string, string> = {
@@ -484,11 +485,10 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         task.emotionalReaction ? emotionalReactionLabels[task.emotionalReaction] || task.emotionalReaction : '',
         task.searchMethod && task.searchMethod.length > 0 ? task.searchMethod.map(m => searchMethodLabels[m] || m).join(', ') : '',
         ...Object.keys(metricConfig).map(key => {
-          // La métrique "ease" (Facilité) n'est pas collectée pour : Découverte, Questions Post-Test, tâches bonus
-          const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
-          const isDiscovery = task.title?.includes('Découverte');
+          // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
+          const isTaskToExclude = task.taskId === 1 || task.taskId === 10;
           const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
-          if (key === 'ease' && (isDiscovery || isPostTest || isBonus)) return '';
+          if (key === 'ease' && (isTaskToExclude || isBonus)) return '';
           return task[key as keyof TaskResult] || '';
         }),
         `"${(task.notes || '').replace(/"/g, '""')}"`,
@@ -774,11 +774,10 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         // Métriques numériques (dynamique selon metricConfig)
         const taskMetrics = [];
         Object.keys(metricConfig).forEach(metricKey => {
-          // La métrique "ease" (Facilité) n'est pas collectée pour : Découverte, Questions Post-Test, tâches bonus
-          const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
-          const isDiscovery = task.title?.includes('Découverte');
+          // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
+          const isTaskToExclude = task.taskId === 1 || task.taskId === 10;
           const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
-          if (metricKey === 'ease' && (isDiscovery || isPostTest || isBonus)) return;
+          if (metricKey === 'ease' && (isTaskToExclude || isBonus)) return;
           
           const value = task[metricKey as keyof TaskResult];
           if (typeof value === 'number') {
@@ -863,17 +862,31 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     console.log('📋 Total tâches (après filtrage skipped):', allTasks.length);
     console.log('📋 Tâches filtrées:', allTasks.map(t => ({ id: t.taskId, title: t.title, success: t.success, ease: t.ease })));
     
+    // Debug: afficher toutes les tâches 9 avec leurs scores d'adoption
+    const task9s = allTasks.filter(t => t.taskId === 9);
+    console.log('🔍 DEBUG - Toutes les tâches 9:', task9s.map(t => ({ 
+      taskId: t.taskId, 
+      postTestAdoption: t.postTestAdoption,
+      postTestFrustrations: t.postTestFrustrations
+    })));
+    
     const availableMetrics = getAvailableMetrics();
     
-    const successRate = allTasks.length > 0 ? (allTasks.filter(t => t.success).length / allTasks.length) * 100 : 0;
-    console.log('✅ Taux de réussite:', successRate.toFixed(1) + '%', `(${allTasks.filter(t => t.success).length}/${allTasks.length})`);
+    // ====== TAUX DE RÉUSSITE ======
+    // IMPORTANT : Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test)
+    // Car ce sont des tâches spéciales qui ne sont pas des "tâches d'usage" standard
+    const tasksForSuccessRate = allTasks.filter(t => t.taskId !== 1 && t.taskId !== 10);
+    const successRate = tasksForSuccessRate.length > 0 
+      ? (tasksForSuccessRate.filter(t => t.success).length / tasksForSuccessRate.length) * 100 
+      : 0;
+    console.log('✅ Taux de réussite:', successRate.toFixed(1) + '%', `(${tasksForSuccessRate.filter(t => t.success).length}/${tasksForSuccessRate.length})`);
 
-    // Calcul du taux d'autonomie
-    // Exclure la tâche 1 (Phase de découverte) qui n'a pas ces métriques
-    const tasksWithAutonomy = allTasks.filter(t => t.taskId !== 1 && t.autonomy !== undefined && t.autonomy !== '' && t.autonomy !== null);
+    // ====== TAUX D'AUTONOMIE ======
+    // Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test) qui n'ont pas ces métriques
+    const tasksWithAutonomy = allTasks.filter(t => t.taskId !== 1 && t.taskId !== 10 && t.autonomy !== undefined && t.autonomy !== '' && t.autonomy !== null);
     console.log('🔍 Autonomie - Tâches avec valeur d\'autonomie:', tasksWithAutonomy.map(t => ({ id: t.taskId, title: t.title, autonomy: t.autonomy })));
     
-    const aloneCount = tasksWithAutonomy.filter(t => t.autonomy === 'alone').length;
+    const aloneCount = tasksWithAutonomy.filter(t => t.autonomy === 'autonomous').length;
     console.log(`🔍 Autonomie - Tâches "alone": ${aloneCount}/${tasksWithAutonomy.length}`);
     
     const autonomyRate = tasksWithAutonomy.length > 0
@@ -895,14 +908,14 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       console.log(`📊 Métrique "${metric}" - Tâches avec valeur avant filtrage:`, tasksWithMetric.length);
       
       // La métrique "ease" (Facilité) est collectée UNIQUEMENT pour les tâches d'usage standard
-      // Exclure : Découverte, Questions Post-Test, et tâches bonus
+      // Exclure : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), et tâches bonus
       if (metric === 'ease') {
         console.log(`   Tâches avant filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
         tasksWithMetric = tasksWithMetric.filter(t => {
-          const isPostTest = t.title === 'Questions Post-Test' || t.title?.includes('Questions Post-Test');
-          const isDiscovery = t.taskId === 1 || t.title?.includes('Découverte');
+          // Filtrer par ID (plus fiable que par titre)
+          const isTaskToExclude = t.taskId === 1 || t.taskId === 10;
           const isBonus = t.title?.includes('Créer un assistant') || t.title?.includes('BONUS');
-          return !isPostTest && !isDiscovery && !isBonus;
+          return !isTaskToExclude && !isBonus;
         });
         console.log(`   Tâches après filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
       }
@@ -928,8 +941,9 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       // Ne pas filtrer par availableMetrics - vérifier directement
       let tasksWithMetric = allTasks.filter(t => {
         const value = t[metric as keyof TaskResult];
-        // Exclure la tâche 1 (Phase de découverte) pour duration, autonomy, pathFluidity
-        if (['duration', 'autonomy', 'pathFluidity'].includes(metric) && t.taskId === 1) {
+        // Exclure la tâche 1 (Phase de découverte) et la tâche 10 (Questions Post-Test) 
+        // pour duration, autonomy, pathFluidity, emotionalReaction
+        if (['duration', 'autonomy', 'pathFluidity', 'emotionalReaction'].includes(metric) && (t.taskId === 1 || t.taskId === 10)) {
           return false;
         }
         return value !== undefined && value !== null && value !== '';
@@ -978,12 +992,11 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
 
       // Ajout des métriques numériques disponibles pour cette tâche
       numericalMetricKeys.forEach(metric => {
-        // La métrique "ease" (Facilité) n'est pas collectée pour : Découverte, Questions Post-Test, tâches bonus
+        // La métrique "ease" (Facilité) n'est pas collectée pour : Tâche 1 (Découverte), Tâche 10 (Questions Post-Test), tâches bonus
         const taskTitle = taskResults[0]?.title || '';
-        const isPostTest = taskTitle === 'Questions Post-Test' || taskTitle.includes('Questions Post-Test');
-        const isDiscovery = taskTitle.includes('Découverte');
+        const isTaskToExclude = taskId === 1 || taskId === 10;
         const isBonus = taskTitle.includes('Créer un assistant') || taskTitle.includes('BONUS');
-        if (metric === 'ease' && (isDiscovery || isPostTest || isBonus)) {
+        if (metric === 'ease' && (isTaskToExclude || isBonus)) {
           return;
         }
         
@@ -995,7 +1008,13 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
 
       // Ajout des métriques catégorielles pour cette tâche
       categoricalMetrics.forEach(metric => {
-        const tasksWithMetric = taskResults.filter(t => t[metric as keyof TaskResult] !== undefined && t[metric as keyof TaskResult] !== null && t[metric as keyof TaskResult] !== '');
+        // Exclure la tâche 1 et la tâche 10 pour certaines métriques
+        let tasksWithMetric = taskResults.filter(t => t[metric as keyof TaskResult] !== undefined && t[metric as keyof TaskResult] !== null && t[metric as keyof TaskResult] !== '');
+        
+        // Ces métriques ne s'appliquent pas à la tâche 1 (Découverte) ni à la tâche 10 (Questions Post-Test)
+        if (['duration', 'autonomy', 'pathFluidity', 'emotionalReaction'].includes(metric) && (taskId === 1 || taskId === 10)) {
+          return;
+        }
         if (tasksWithMetric.length > 0) {
           const distribution: Record<string, number> = {};
           tasksWithMetric.forEach(t => {
@@ -1064,7 +1083,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     // Insights sur les métriques catégorielles
     if (categoricalStats.autonomy) {
       const totalAutonomy = Object.entries(categoricalStats.autonomy).reduce((sum, [, count]) => sum + count, 0);
-      const aloneCount = categoricalStats.autonomy['alone'] || 0;
+      const aloneCount = categoricalStats.autonomy['autonomous'] || 0;
       if (aloneCount / totalAutonomy >= 0.7) {
         strengths.push('Forte autonomie des utilisateurs');
       } else if (aloneCount / totalAutonomy < 0.5) {
@@ -1081,12 +1100,16 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     }
 
     // Calcul du score d'adoption moyen (collecté dans la tâche 9 - Questions Post-Test)
-    const tasksWithAdoption = allTasks.filter(t => t.postTestAdoption !== undefined && t.postTestAdoption !== null);
-    console.log('📊 Score d\'adoption - Tâches avec postTestAdoption:', tasksWithAdoption.map(t => ({ id: t.taskId, adoption: t.postTestAdoption })));
+    // Ne prendre en compte que les tâches 10 avec un score d'adoption renseigné (tâche Questions Post-Test)
+    console.log('📊 ===== ANALYSE SCORE D\'ADOPTION =====');
+    console.log('📊 Toutes les tâches:', allTasks.map(t => ({ sessionId: sessions.find((s: any) => s.tasks?.some((st: any) => st === t))?.id, taskId: t.taskId, adoption: t.postTestAdoption })));
+    const tasksWithAdoption = allTasks.filter(t => t.taskId === 10 && t.postTestAdoption !== undefined && t.postTestAdoption !== null);
+    console.log('📊 Score d\'adoption - Tâches 10 (Questions Post-Test) avec postTestAdoption:', tasksWithAdoption.map(t => ({ id: t.taskId, adoption: t.postTestAdoption })));
     const adoptionScore = tasksWithAdoption.length > 0
       ? tasksWithAdoption.reduce((sum, t) => sum + (t.postTestAdoption || 0), 0) / tasksWithAdoption.length
       : null;
     console.log('📊 Score d\'adoption final:', adoptionScore?.toFixed(2));
+    console.log('📊 ===== FIN ANALYSE =====');
 
     // Insights sur le score d'adoption
     if (adoptionScore !== null) {
@@ -1536,25 +1559,26 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                   // Analyse Autonomie
                   if (stats.categoricalStats.autonomy) {
                     const total = Object.values(stats.categoricalStats.autonomy).reduce((sum, c) => sum + c, 0);
-                    const alone = stats.categoricalStats.autonomy['alone'] || 0;
-                    const withHelp = stats.categoricalStats.autonomy['with-help'] || 0;
-                    const failed = stats.categoricalStats.autonomy['failed'] || 0;
-                    const aloneRate = (alone / total) * 100;
+                    const autonomous = stats.categoricalStats.autonomy['autonomous'] || 0;
+                    const minimalHelp = stats.categoricalStats.autonomy['minimal-help'] || 0;
+                    const guided = stats.categoricalStats.autonomy['guided'] || 0;
+                    const blocked = stats.categoricalStats.autonomy['blocked'] || 0;
+                    const autonomousRate = (autonomous / total) * 100;
                     
-                    if (aloneRate >= 70) {
+                    if (autonomousRate >= 70) {
                       insights.push({
                         type: 'success',
                         icon: Zap,
                         title: 'Excellente autonomie',
-                        message: `${aloneRate.toFixed(0)}% des tâches réussies sans aide (${alone}/${total})`,
+                        message: `${autonomousRate.toFixed(0)}% des tâches réussies sans aide (${autonomous}/${total})`,
                         recommendation: 'Les utilisateurs naviguent intuitivement. Maintenez cette clarté dans les futures fonctionnalités.'
                       });
-                    } else if (aloneRate < 50) {
+                    } else if (autonomousRate < 50) {
                       insights.push({
                         type: 'alert',
                         icon: AlertTriangle,
                         title: 'Aide fréquemment nécessaire',
-                        message: `Seulement ${aloneRate.toFixed(0)}% d'autonomie (${withHelp} avec aide, ${failed} échecs)`,
+                        message: `Seulement ${autonomousRate.toFixed(0)}% d'autonomie (${minimalHelp + guided} avec aide, ${blocked} bloqués)`,
                         recommendation: 'URGENT : Ajouter des tooltips contextuels, simplifier les parcours et renforcer l\'onboarding.'
                       });
                     } else {
@@ -1562,7 +1586,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         type: 'warning',
                         icon: Zap,
                         title: 'Autonomie moyenne',
-                        message: `${aloneRate.toFixed(0)}% d'autonomie - ${withHelp} utilisateurs ont besoin d'indices`,
+                        message: `${autonomousRate.toFixed(0)}% d'autonomie - ${minimalHelp + guided} utilisateurs ont besoin d'indices`,
                         recommendation: 'Ajoutez des messages d\'aide inline et des exemples concrets pour guider les utilisateurs.'
                       });
                     }
@@ -1841,10 +1865,10 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                       {/* Autonomie */}
                       {stats.categoricalStats.autonomy && (() => {
                         const COLORS = {
-                          'alone': 'var(--success)',
-                          'hints': 'var(--warning)',
-                          'with-help': '#FF9800',
-                          'failed': 'var(--destructive)'
+                          'autonomous': 'var(--success)',
+                          'minimal-help': 'var(--warning)',
+                          'guided': '#FF9800',
+                          'blocked': 'var(--destructive)'
                         };
                         const data = Object.entries(stats.categoricalStats.autonomy).map(([key, count]) => {
                           const total = Object.values(stats.categoricalStats.autonomy).reduce((sum, c) => sum + c, 0);
@@ -2144,7 +2168,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                     ).length;
                     
                     const needsHelpCount = taskFeedbacks.filter(t => 
-                      t.autonomy === 'with-help' || t.autonomy === 'failed'
+                      t.autonomy === 'minimal-help' || t.autonomy === 'guided' || t.autonomy === 'blocked'
                     ).length;
 
                     // Tâche avec taux de succès < 50% = Impact élevé
@@ -2438,15 +2462,15 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                           <p className="text-[var(--foreground)] mb-2">Autonomie (valeur dominante) :</p>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--success)]">Réussi seul</span>
+                              <span className="text-[var(--success)]">Totalement autonome</span>
                               <span className="text-[var(--muted-foreground)]">Vert</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--warning)]">Réussi avec indices</span>
+                              <span className="text-[var(--warning)]">Aide minimale</span>
                               <span className="text-[var(--muted-foreground)]">Orange</span>
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--destructive)]">Échec malgré aide</span>
+                              <span className="text-[var(--destructive)]">A dû être guidé / Bloqué</span>
                               <span className="text-[var(--muted-foreground)]">Rouge</span>
                             </div>
                           </div>
@@ -2493,10 +2517,10 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                 const metricsToShow = getAllMetricsInTask(task);
                 
                 // Métriques catégorielles importantes : durée, fluidité et autonomie
-                // Pas de ces métriques pour la tâche 1 (Phase de découverte)
-                const duration = (task.taskId !== 1 && task.duration) ? getDominantValue(task.duration) : null;
-                const pathFluidity = (task.taskId !== 1 && task.pathFluidity) ? getDominantValue(task.pathFluidity) : null;
-                const autonomy = (task.taskId !== 1 && task.autonomy) ? getDominantValue(task.autonomy) : null;
+                // Pas de ces métriques pour la tâche 1 (Phase de découverte) ni la tâche 10 (Questions Post-Test)
+                const duration = (task.taskId !== 1 && task.taskId !== 10 && task.duration) ? getDominantValue(task.duration) : null;
+                const pathFluidity = (task.taskId !== 1 && task.taskId !== 10 && task.pathFluidity) ? getDominantValue(task.pathFluidity) : null;
+                const autonomy = (task.taskId !== 1 && task.taskId !== 10 && task.autonomy) ? getDominantValue(task.autonomy) : null;
                 
                 // Log pour debug
                 if (task.taskId === 2 || task.taskId === 3) {
@@ -2515,8 +2539,8 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         <span className="text-xs text-[var(--muted-foreground)]">#{task.taskId}</span>
                         <span className="text-[var(--foreground)] truncate">{task.taskTitle}</span>
                       </div>
-                      {/* Pas de taux de réussite pour la tâche 1 */}
-                      {task.taskId !== 1 && (
+                      {/* Pas de taux de réussite pour la tâche 1 (Découverte) ni la tâche 10 (Questions Post-Test) */}
+                      {task.taskId !== 1 && task.taskId !== 10 && (
                       <Badge 
                         variant={task.successRate >= 80 ? "default" : task.successRate >= 60 ? "secondary" : "destructive"}
                         className={task.successRate >= 80 ? 'bg-[var(--success)] text-[var(--success-foreground)] hover:bg-[var(--success)]' : task.successRate >= 60 ? 'bg-[var(--info)] text-[var(--info-foreground)] hover:bg-[var(--info)]' : ''}
@@ -2574,9 +2598,11 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         <div className="flex items-center gap-1.5">
                           <Zap className="w-3.5 h-3.5 text-[var(--muted-foreground)]" />
                           <span className={`text-xs ${
-                            autonomy === 'alone' ? 'text-[var(--success)]' :
-                            autonomy === 'with-help' ? 'text-[var(--warning)]' :
-                            'text-[var(--destructive)]'
+                            autonomy === 'autonomous' ? 'text-[var(--success)]' :
+                            autonomy === 'minimal-help' ? 'text-[var(--warning)]' :
+                            autonomy === 'guided' ? 'text-[var(--destructive)]' :
+                            autonomy === 'blocked' ? 'text-[var(--destructive)]' :
+                            'text-[var(--muted-foreground)]'
                           }`}>
                             {autonomyLabels[autonomy] || autonomy}
                           </span>

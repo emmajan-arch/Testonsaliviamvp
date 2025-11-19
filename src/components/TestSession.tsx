@@ -282,8 +282,29 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
     return defaultTestTasks;
   });
 
+  const [participant, setParticipant] = useState(() => {
+    const saved = localStorage.getItem('currentSession');
+    return saved ? (JSON.parse(saved).participant || { name: '', role: '', experience: '', aiToolsFrequency: '', aiToolsEase: '', aliviaFrequency: '' }) : { name: '', role: '', experience: '', aiToolsFrequency: '', aiToolsEase: '', aliviaFrequency: '' };
+  });
+  
+  const [isParticipantRegistered, setIsParticipantRegistered] = useState(() => {
+    const saved = localStorage.getItem('currentSession');
+    return saved ? (JSON.parse(saved).isParticipantRegistered || false) : false;
+  });
+
+  const [sessionStarted, setSessionStarted] = useState(() => {
+    const saved = localStorage.getItem('currentSession');
+    return saved ? (JSON.parse(saved).sessionStarted || false) : false;
+  });
+
   useEffect(() => {
     const loadTasks = async () => {
+      // NE PAS recharger les tâches si une session est en cours
+      if (sessionStarted) {
+        console.log('⏸️ Session active - rechargement des tâches désactivé');
+        return;
+      }
+      
       try {
         const data = await getProtocolFromSupabase();
         if (data?.tasks && Array.isArray(data.tasks) && data.tasks.length > 0) {
@@ -304,31 +325,24 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         } catch (e) { setTestTasks(defaultTestTasks); }
       } else setTestTasks(defaultTestTasks);
     };
-    loadTasks();
     
-    const handleStorageChange = () => { loadTasks(); };
+    // Charger une seule fois au démarrage si aucune session active
+    if (!sessionStarted) {
+      loadTasks();
+    }
+    
+    const handleStorageChange = () => { 
+      if (!sessionStarted) loadTasks(); 
+    };
     window.addEventListener('storage', handleStorageChange);
-    const interval = setInterval(loadTasks, 5000);
+    const interval = setInterval(() => {
+      if (!sessionStarted) loadTasks();
+    }, 5000);
     return () => {
       window.removeEventListener('storage', handleStorageChange);
       clearInterval(interval);
     };
-  }, []);
-
-  const [participant, setParticipant] = useState(() => {
-    const saved = localStorage.getItem('currentSession');
-    return saved ? (JSON.parse(saved).participant || { name: '', role: '', experience: '', aiToolsFrequency: '', aiToolsEase: '', aliviaFrequency: '' }) : { name: '', role: '', experience: '', aiToolsFrequency: '', aiToolsEase: '', aliviaFrequency: '' };
-  });
-  
-  const [isParticipantRegistered, setIsParticipantRegistered] = useState(() => {
-    const saved = localStorage.getItem('currentSession');
-    return saved ? (JSON.parse(saved).isParticipantRegistered || false) : false;
-  });
-
-  const [sessionStarted, setSessionStarted] = useState(() => {
-    const saved = localStorage.getItem('currentSession');
-    return saved ? (JSON.parse(saved).sessionStarted || false) : false;
-  });
+  }, [sessionStarted]);
 
   const [currentTask, setCurrentTask] = useState(() => {
     const saved = localStorage.getItem('currentSession');
@@ -397,15 +411,8 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         
         // NETTOYAGE: Supprimer les champs post-test des tâches qui ne sont pas la tâche 9
         const cleanedTasks = sessionToEdit.tasks.map((task: TaskResult) => {
-          if (task.taskId !== 9) {
-            return {
-              ...task,
-              postTestFrustrations: '',
-              postTestDataStorage: '',
-              postTestPracticalUse: '',
-              postTestAdoption: 5
-            };
-          }
+          console.log('🔍 DEBUG LOAD - Tâche:', task.taskId, 'postTestAdoption:', task.postTestAdoption);
+          // Pas de nettoyage : les champs post-test ne s'affichent que sur la tâche 9
           return task;
         });
         
@@ -415,16 +422,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         setCurrentTask(lastTaskIndex);
         if (cleanedTasks[lastTaskIndex]) {
           let taskData = cleanedTasks[lastTaskIndex];
-          // Nettoyer aussi currentTaskData si ce n'est pas la tâche 9
-          if (testTasks[lastTaskIndex]?.id !== 9) {
-            taskData = {
-              ...taskData,
-              postTestFrustrations: '',
-              postTestDataStorage: '',
-              postTestPracticalUse: '',
-              postTestAdoption: 5
-            };
-          }
+          // Pas de nettoyage : les champs post-test ne s'affichent que sur la tâche 9
           setCurrentTaskData(taskData);
         }
         toast.success('Session chargée pour modification');
@@ -435,6 +433,11 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   useEffect(() => {
     const sessionState = { participant, isParticipantRegistered, sessionStarted, currentTask, taskResults, currentTaskData, generalObservations, editingSessionId };
     localStorage.setItem('currentSession', JSON.stringify(sessionState));
+    
+    // Debug: afficher le score d'adoption de currentTaskData
+    if (currentTaskData.taskId === 9) {
+      console.log('🔍 DEBUG currentTaskData - Score d\'adoption tâche 9:', currentTaskData.postTestAdoption);
+    }
   }, [participant, isParticipantRegistered, sessionStarted, currentTask, taskResults, currentTaskData, generalObservations, editingSessionId]);
 
   const handleNextTask = () => {
@@ -450,16 +453,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
       const savedTaskData = updatedResults.find(r => r.taskId === testTasks[nextTask].id);
       let taskData = savedTaskData || createEmptyResult(testTasks[nextTask]);
       
-      // NETTOYAGE: Si ce n'est PAS la tâche 9, supprimer les champs post-test
-      if (testTasks[nextTask].id !== 9) {
-        taskData = {
-          ...taskData,
-          postTestFrustrations: '',
-          postTestDataStorage: '',
-          postTestPracticalUse: '',
-          postTestAdoption: 5
-        };
-      }
+      // Pas de nettoyage : les champs post-test ne s'affichent que sur la tâche 9
       
       setCurrentTaskData(taskData);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -480,16 +474,8 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
       const savedTaskData = updatedResults.find(r => r.taskId === testTasks[prevTask].id);
       let taskData = savedTaskData || createEmptyResult(testTasks[prevTask]);
       
-      // NETTOYAGE: Si ce n'est PAS la tâche 9, supprimer les champs post-test
-      if (testTasks[prevTask].id !== 9) {
-        taskData = {
-          ...taskData,
-          postTestFrustrations: '',
-          postTestDataStorage: '',
-          postTestPracticalUse: '',
-          postTestAdoption: 5
-        };
-      }
+      // Les champs post-test ne s'affichent que sur la tâche 9, donc pas besoin de les nettoyer ailleurs
+      // Le nettoyage précédent causait un bug : il écrasait le score d'adoption sauvegardé !
       
       setCurrentTaskData(taskData);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -498,10 +484,18 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   };
 
   const saveSession = async () => {
+    console.log('💾 ===== DÉBUT SAUVEGARDE =====');
+    console.log('📊 currentTaskData au moment du clic:', JSON.stringify(currentTaskData, null, 2));
+    
     const updatedResults = [...taskResults];
     const existingIndex = updatedResults.findIndex(r => r.taskId === currentTaskData.taskId);
     if (existingIndex !== -1) updatedResults[existingIndex] = currentTaskData;
     else updatedResults.push(currentTaskData);
+
+    // Debug: vérifier le score d'adoption avant sauvegarde
+    const task9 = updatedResults.find(t => t.taskId === 9);
+    console.log('🔍 DEBUG SAVE - Score d\'adoption tâche 9 avant sauvegarde:', task9?.postTestAdoption);
+    console.log('🔍 DEBUG SAVE - Toutes les données tâche 9:', task9);
 
     const sessionData = { participant, tasks: updatedResults, generalObservations };
     try {
@@ -576,9 +570,9 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   const progress = ((currentTask + 1) / testTasks.length) * 100;
   const currentTaskObj = testTasks[currentTask];
   
-  // UNIQUEMENT la tâche 9 affiche les questions post-test
-  // On se base sur le titre plutôt que l'ID pour éviter les problèmes de synchronisation
-  const isPostTestTask = currentTaskObj?.title === 'Questions Post-Test';
+  // UNIQUEMENT la tâche 10 (Questions Post-Test) affiche les questions post-test
+  // On se base sur l'ID 10 car même si le titre est modifié dans le protocole, l'ID reste stable
+  const isPostTestTask = currentTaskObj?.id === 10;
   
   // Seules les tâches marquées optional: true sont facultatives (tâche 10 "Créer un assistant")
   // On détecte par : propriété optional OU titre qui contient "Créer un assistant"
@@ -605,16 +599,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
     const savedTaskData = updatedResults.find(r => r.taskId === testTasks[taskIndex].id);
     let taskData = savedTaskData || createEmptyResult(testTasks[taskIndex]);
     
-    // NETTOYAGE: Si ce n'est PAS la tâche 9, supprimer les champs post-test
-    if (testTasks[taskIndex].id !== 9) {
-      taskData = {
-        ...taskData,
-        postTestFrustrations: '',
-        postTestDataStorage: '',
-        postTestPracticalUse: '',
-        postTestAdoption: 5
-      };
-    }
+    // Pas de nettoyage : les champs post-test ne s'affichent que sur la tâche 9
     
     setCurrentTaskData(taskData);
     
@@ -940,7 +925,10 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                     min={1}
                     max={10}
                     step={1}
-                    onValueChange={(val) => setCurrentTaskData({...currentTaskData, postTestAdoption: val[0]})}
+                    onValueChange={(val) => {
+                      console.log('🔍 DEBUG SLIDER - Nouvelle valeur d\'adoption:', val[0]);
+                      setCurrentTaskData({...currentTaskData, postTestAdoption: val[0]});
+                    }}
                     className="py-4"
                     disabled={isReadOnly}
                   />
