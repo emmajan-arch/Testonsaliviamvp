@@ -22,6 +22,7 @@ import { syncWithSupabase, deleteSession as deleteFromSupabase, uploadRecording,
 import { toast } from 'sonner@2.0.3';
 import { QualitativeSynthesis } from './QualitativeSynthesis';
 import { VideoPlayer, VideoPlayerRef } from './VideoPlayer';
+import { generateCompletePDF } from '../utils/pdfExport';
 
 // Fonction utilitaire pour supprimer les émojis
 const removeEmojis = (text: string): string => {
@@ -751,6 +752,19 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
   };
 
   const exportToPDF = () => {
+    const stats = calculateStats();
+    if (!stats) {
+      toast.error('Impossible de générer le PDF : aucune donnée disponible');
+      return;
+    }
+    
+    const doc = generateCompletePDF({ sessions, stats });
+    doc.save(`alivia-test-results-${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success('Résultats exportés en PDF !');
+  };
+
+  /* ANCIENNE FONCTION - CONSERVÉE POUR RÉFÉRENCE
+  const exportToPDF_OLD = () => {
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -759,121 +773,334 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     const rightMargin = pageWidth - 15;
     const maxWidth = rightMargin - leftMargin;
 
-    // En-tête
-    doc.setFontSize(20);
-    doc.setTextColor(30, 14, 98); // #1E0E62
-    doc.text('Alivia - Résultats Tests UX', leftMargin, yPos);
+    // Couleurs du design system Alivia
+    const colors = {
+      primary: [30, 14, 98],      // #1E0E62
+      accent: [101, 84, 192],     // #6554C0
+      success: [34, 197, 94],     // #22C55E
+      warning: [251, 146, 60],    // #FB923C
+      error: [239, 68, 68],       // #EF4444
+      muted: [148, 163, 184],     // #94A3B8
+      text: [15, 23, 42]          // #0F172A
+    };
+
+    // Fonction pour dessiner une jauge circulaire
+    const drawGauge = (x: number, y: number, radius: number, percentage: number, color: number[], label: string) => {
+      // Cercle de fond
+      doc.setDrawColor(230, 230, 230);
+      doc.setLineWidth(3);
+      doc.circle(x, y, radius, 'S');
+      
+      // Arc de progression
+      if (percentage > 0) {
+        doc.setDrawColor(...color);
+        doc.setLineWidth(3);
+        const startAngle = -90;
+        const endAngle = startAngle + (percentage / 100) * 360;
+        
+        // Dessiner l'arc par segments
+        const segments = 30;
+        for (let i = 0; i < segments; i++) {
+          const angle1 = startAngle + (i / segments) * (endAngle - startAngle);
+          const angle2 = startAngle + ((i + 1) / segments) * (endAngle - startAngle);
+          
+          if (angle2 <= endAngle) {
+            const x1 = x + radius * Math.cos(angle1 * Math.PI / 180);
+            const y1 = y + radius * Math.sin(angle1 * Math.PI / 180);
+            const x2 = x + radius * Math.cos(angle2 * Math.PI / 180);
+            const y2 = y + radius * Math.sin(angle2 * Math.PI / 180);
+            doc.line(x1, y1, x2, y2);
+          }
+        }
+      }
+      
+      // Pourcentage au centre
+      doc.setFontSize(16);
+      doc.setTextColor(...color);
+      doc.text(`${percentage.toFixed(0)}%`, x, y + 2, { align: 'center' });
+      
+      // Label en dessous
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(label, x, y + radius + 8, { align: 'center' });
+    };
+
+    // Fonction pour dessiner une barre de progression horizontale
+    const drawProgressBar = (x: number, y: number, width: number, height: number, percentage: number, color: number[], label: string, value: string) => {
+      // Label
+      doc.setFontSize(9);
+      doc.setTextColor(60, 60, 60);
+      doc.text(label, x, y - 2);
+      
+      // Valeur à droite
+      doc.setTextColor(...color);
+      doc.text(value, x + width, y - 2, { align: 'right' });
+      
+      // Fond de la barre
+      doc.setFillColor(240, 240, 240);
+      doc.rect(x, y, width, height, 'F');
+      
+      // Barre de progression
+      if (percentage > 0) {
+        doc.setFillColor(...color);
+        doc.rect(x, y, (width * percentage) / 100, height, 'F');
+      }
+    };
+
+    // ==========================================
+    // PAGE 1 : VUE D'ENSEMBLE
+    // ==========================================
     
-    yPos += 8;
+    // En-tête avec logo
+    doc.setFontSize(24);
+    doc.setTextColor(...colors.primary);
+    doc.text('Alivia', leftMargin, yPos);
+    
+    yPos += 4;
     doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR')}`, leftMargin, yPos);
+    doc.setTextColor(150, 150, 150);
+    doc.text('Rapport Tests UX', leftMargin, yPos);
     
-    yPos += 10;
-    doc.setDrawColor(30, 14, 98);
-    doc.setLineWidth(0.5);
+    // Date
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text(`Généré le ${new Date().toLocaleDateString('fr-FR', { 
+      day: 'numeric', 
+      month: 'long', 
+      year: 'numeric' 
+    })}`, rightMargin, yPos, { align: 'right' });
+    
+    yPos += 5;
+    doc.setDrawColor(...colors.accent);
+    doc.setLineWidth(0.8);
     doc.line(leftMargin, yPos, rightMargin, yPos);
     
-    yPos += 10;
+    yPos += 15;
 
     // Statistiques globales
     const stats = calculateStats();
     if (stats) {
       doc.setFontSize(14);
-      doc.setTextColor(30, 14, 98);
-      doc.text('Vue d\'Ensemble', leftMargin, yPos);
-      yPos += 8;
+      doc.setTextColor(...colors.primary);
+      doc.text('📊 Vue d\'Ensemble', leftMargin, yPos);
+      yPos += 12;
 
-      doc.setFontSize(10);
-      doc.setTextColor(60, 60, 60);
+      // Jauges principales (3 jauges côte à côte)
+      const gaugeY = yPos;
+      const gaugeSpacing = 60;
+      const gaugeRadius = 12;
       
-      const metrics = [
-        `Sessions: ${sessions.length}`,
-        `Participants: ${new Set(sessions.map(s => s.participant.name)).size}`,
-        `Taux de réussite: ${stats.successRate.toFixed(0)}%`,
-        stats.autonomyRate !== null ? `Autonomie complète: ${stats.autonomyRate.toFixed(0)}%` : null
-      ].filter(Boolean);
+      // Jauge 1: Taux de réussite
+      drawGauge(
+        leftMargin + 25, 
+        gaugeY, 
+        gaugeRadius, 
+        stats.successRate, 
+        colors.success,
+        'Taux de réussite'
+      );
+      
+      // Jauge 2: Autonomie
+      if (stats.autonomyRate !== null) {
+        drawGauge(
+          leftMargin + 25 + gaugeSpacing, 
+          gaugeY, 
+          gaugeRadius, 
+          stats.autonomyRate, 
+          stats.autonomyRate >= 70 ? colors.success : colors.warning,
+          'Autonomie'
+        );
+      }
+      
+      // Jauge 3: Score d'adoption
+      if (stats.adoptionScore !== null) {
+        const adoptionPercent = (stats.adoptionScore / 10) * 100;
+        drawGauge(
+          leftMargin + 25 + gaugeSpacing * 2, 
+          gaugeY, 
+          gaugeRadius, 
+          adoptionPercent, 
+          adoptionPercent >= 80 ? colors.success : adoptionPercent >= 60 ? colors.warning : colors.error,
+          'Adoption'
+        );
+      }
+      
+      yPos = gaugeY + gaugeRadius + 15;
 
-      metrics.forEach(metric => {
-        if (metric) {
-          doc.text(metric, leftMargin + 5, yPos);
-          yPos += 6;
+      // Métriques textuelles
+      yPos += 10;
+      doc.setFontSize(10);
+      doc.setTextColor(80, 80, 80);
+      
+      const metricsGrid = [
+        [`Sessions: ${sessions.length}`, `Participants: ${new Set(sessions.map(s => s.participant.name)).size}`],
+        [`Tests réussis: ${Math.round((stats.successRate / 100) * sessions.reduce((sum, s) => sum + s.tasks.length, 0))}/${sessions.reduce((sum, s) => sum + s.tasks.length, 0)}`, 
+         stats.adoptionScore ? `Score moyen: ${stats.adoptionScore.toFixed(1)}/10` : '']
+      ];
+      
+      metricsGrid.forEach(row => {
+        doc.text(row[0], leftMargin + 5, yPos);
+        if (row[1]) {
+          doc.text(row[1], leftMargin + 95, yPos);
         }
+        yPos += 6;
       });
 
-      yPos += 5;
+      // Métriques numériques (Facilité, Compréhension, etc.)
+      if (stats.numericalMetrics && Object.keys(stats.numericalMetrics).length > 0) {
+        yPos += 8;
+        doc.setFontSize(12);
+        doc.setTextColor(...colors.primary);
+        doc.text('🎯 Métriques de satisfaction', leftMargin, yPos);
+        yPos += 10;
+
+        Object.entries(stats.numericalMetrics).forEach(([metricKey, data]) => {
+          const config = metricConfig[metricKey];
+          if (!config) return;
+          
+          const avgScore = data.totalScore / data.count;
+          const percentage = (avgScore / 10) * 100;
+          
+          let barColor = colors.success;
+          if (avgScore < 5) barColor = colors.error;
+          else if (avgScore < 7) barColor = colors.warning;
+          
+          drawProgressBar(
+            leftMargin + 5,
+            yPos,
+            maxWidth - 10,
+            4,
+            percentage,
+            barColor,
+            config.label,
+            `${avgScore.toFixed(1)}/10`
+          );
+          
+          yPos += 12;
+        });
+      }
+
+      // Insights
+      if (stats.insights.strengths.length > 0 || stats.insights.improvements.length > 0) {
+        yPos += 10;
+        
+        // Points forts
+        if (stats.insights.strengths.length > 0) {
+          doc.setFontSize(11);
+          doc.setTextColor(...colors.success);
+          doc.text('✓ Points forts', leftMargin, yPos);
+          yPos += 6;
+          
+          doc.setFontSize(8);
+          doc.setTextColor(60, 60, 60);
+          stats.insights.strengths.slice(0, 3).forEach(strength => {
+            const lines = doc.splitTextToSize(`• ${strength}`, maxWidth - 10);
+            lines.forEach((line: string) => {
+              if (yPos > pageHeight - 30) {
+                doc.addPage();
+                yPos = 20;
+              }
+              doc.text(line, leftMargin + 5, yPos);
+              yPos += 4;
+            });
+          });
+          yPos += 4;
+        }
+        
+        // Points d'amélioration
+        if (stats.insights.improvements.length > 0) {
+          if (yPos > pageHeight - 50) {
+            doc.addPage();
+            yPos = 20;
+          }
+          
+          doc.setFontSize(11);
+          doc.setTextColor(...colors.warning);
+          doc.text('⚠ Points d\'amélioration', leftMargin, yPos);
+          yPos += 6;
+          
+          doc.setFontSize(8);
+          doc.setTextColor(60, 60, 60);
+          stats.insights.improvements.slice(0, 3).forEach(improvement => {
+            const lines = doc.splitTextToSize(`• ${improvement}`, maxWidth - 10);
+            lines.forEach((line: string) => {
+              if (yPos > pageHeight - 20) {
+                doc.addPage();
+                yPos = 20;
+              }
+              doc.text(line, leftMargin + 5, yPos);
+              yPos += 4;
+            });
+          });
+        }
+      }
     }
 
-    // Sessions détaillées
+    // ==========================================
+    // PAGE 2+ : DÉTAILS DES SESSIONS
+    // ==========================================
+    doc.addPage();
+    yPos = 20;
+    
+    doc.setFontSize(16);
+    doc.setTextColor(...colors.primary);
+    doc.text('📋 Détail des Sessions', leftMargin, yPos);
+    yPos += 10;
+
     sessions.forEach((session, index) => {
-      if (yPos > pageHeight - 40) {
+      if (yPos > pageHeight - 60) {
         doc.addPage();
         yPos = 20;
       }
 
-      doc.setFontSize(12);
-      doc.setTextColor(30, 14, 98);
-      doc.text(`Session ${index + 1} - ${session.participant.name}`, leftMargin, yPos);
-      yPos += 6;
+      // Encadré pour chaque session
+      doc.setDrawColor(...colors.accent);
+      doc.setLineWidth(0.3);
+      doc.setFillColor(250, 250, 255);
+      doc.roundedRect(leftMargin, yPos - 5, maxWidth, 15, 2, 2, 'FD');
 
-      doc.setFontSize(9);
-      doc.setTextColor(100, 100, 100);
-      doc.text(`${session.participant.role} | ${new Date(session.date).toLocaleDateString('fr-FR')}`, leftMargin, yPos);
-      yPos += 5;
+      doc.setFontSize(11);
+      doc.setTextColor(...colors.primary);
+      doc.text(`Session ${index + 1} • ${session.participant.name}`, leftMargin + 3, yPos);
       
-      if (session.participant.aiToolsFrequency || session.participant.aiToolsEase || session.participant.aliviaFrequency) {
-        doc.setFontSize(8);
-        doc.setTextColor(120, 120, 120);
-        const profileInfo = [];
-        if (session.participant.aiToolsFrequency) profileInfo.push(`IA: ${session.participant.aiToolsFrequency}`);
-        if (session.participant.aiToolsEase) profileInfo.push(`Aisance: ${session.participant.aiToolsEase}`);
-        if (session.participant.aliviaFrequency) profileInfo.push(`Alivia: ${session.participant.aliviaFrequency}`);
-        doc.text(profileInfo.join(' | '), leftMargin, yPos);
-        yPos += 6;
-      } else {
-        yPos += 3;
-      }
+      doc.setFontSize(8);
+      doc.setTextColor(100, 100, 100);
+      doc.text(`${session.participant.role} • ${new Date(session.date).toLocaleDateString('fr-FR')}`, 
+        leftMargin + 3, yPos + 5);
+      
+      yPos += 18;
 
       // Tâches
       session.tasks.forEach((task, taskIndex) => {
-        if (yPos > pageHeight - 30) {
+        if (yPos > pageHeight - 35) {
           doc.addPage();
           yPos = 20;
         }
 
-        doc.setFontSize(10);
+        // Titre de la tâche avec icône de statut
+        doc.setFontSize(9);
+        const statusIcon = task.success ? '✓' : '✗';
+        const statusColor = task.success ? colors.success : colors.error;
+        doc.setTextColor(...statusColor);
+        doc.text(statusIcon, leftMargin + 5, yPos);
+        
         doc.setTextColor(60, 60, 60);
-        const taskTitle = `Tâche ${taskIndex + 1}: ${removeEmojis(task.title)}`;
-        doc.text(taskTitle, leftMargin + 3, yPos);
+        const cleanTitle = removeEmojis(task.title);
+        doc.text(`Tâche ${taskIndex + 1}: ${cleanTitle}`, leftMargin + 10, yPos);
         yPos += 5;
 
-        doc.setFontSize(8);
-        if (task.success) {
-          doc.setTextColor(34, 197, 94); // green
-        } else {
-          doc.setTextColor(239, 68, 68); // red
-        }
-        doc.text(task.success ? 'Réussite' : 'Échec', leftMargin + 6, yPos);
-        yPos += 5;
-
-        // Métriques numériques (dynamique selon metricConfig)
-        const taskMetrics = [];
+        // Métriques de la tâche
+        const taskMetrics: string[] = [];
         Object.keys(metricConfig).forEach(metricKey => {
-          // Détection du type de tâche
           const isPostTest = task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test');
           const isDiscovery = task.title?.includes('Découverte');
           const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
           
-          // Pour la tâche Découverte : afficher seulement valuePropositionClarity et firstImpression
           if (isDiscovery) {
             if (metricKey !== 'valuePropositionClarity' && metricKey !== 'firstImpression') return;
-          }
-          // Pour Questions Post-Test et tâches bonus : ne pas afficher ease
-          else if (metricKey === 'ease' && (isPostTest || isBonus)) {
+          } else if (metricKey === 'ease' && (isPostTest || isBonus)) {
             return;
-          }
-          // Pour les autres tâches : ne pas afficher valuePropositionClarity et firstImpression
-          else if (metricKey === 'valuePropositionClarity' || metricKey === 'firstImpression') {
+          } else if (metricKey === 'valuePropositionClarity' || metricKey === 'firstImpression') {
             return;
           }
           
@@ -884,33 +1111,52 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         });
 
         if (taskMetrics.length > 0) {
-          doc.setTextColor(100, 100, 100);
-          doc.text(taskMetrics.join(' | '), leftMargin + 6, yPos);
-          yPos += 5;
+          doc.setFontSize(7);
+          doc.setTextColor(120, 120, 120);
+          doc.text(taskMetrics.join(' • '), leftMargin + 10, yPos);
+          yPos += 4;
         }
 
-        // Notes
+        // Notes avec fond grisé
         if (task.notes && task.notes.trim()) {
+          doc.setFillColor(248, 248, 248);
+          const notesHeight = Math.min(doc.splitTextToSize(task.notes, maxWidth - 20).length * 3.5 + 2, 20);
+          doc.rect(leftMargin + 10, yPos - 2, maxWidth - 15, notesHeight, 'F');
+          
+          doc.setFontSize(7);
           doc.setTextColor(80, 80, 80);
-          const noteLines = doc.splitTextToSize(`Notes: ${task.notes}`, maxWidth - 10);
-          noteLines.forEach((line: string) => {
+          const noteLines = doc.splitTextToSize(task.notes, maxWidth - 20);
+          noteLines.slice(0, 5).forEach((line: string) => {
             if (yPos > pageHeight - 20) {
               doc.addPage();
               yPos = 20;
             }
-            doc.text(line, leftMargin + 6, yPos);
-            yPos += 4;
+            doc.text(line, leftMargin + 12, yPos);
+            yPos += 3.5;
           });
+          yPos += 2;
         }
 
-        yPos += 3;
+        yPos += 4;
       });
 
-      yPos += 5;
+      yPos += 6;
     });
 
+    // Pied de page sur toutes les pages
+    const totalPages = (doc as any).internal.pages.length - 1;
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Page ${i}/${totalPages}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+      doc.text('Alivia Tests UX', rightMargin, pageHeight - 10, { align: 'right' });
+    }
+
     doc.save(`alivia-test-results-${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success('Résultats exportés en PDF !');
   };
+  */
 
   // Détecte les métriques disponibles dans les sessions
   const getAvailableMetrics = () => {
@@ -988,7 +1234,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
 
     // Calcul des moyennes pour les métriques numériques (échelles 1-10)
     // Utiliser uniquement les métriques définies dans metricConfig
-    const numericalMetrics: Record<string, number> = {};
+    const numericalMetrics: Record<string, { totalScore: number; count: number }> = {};
     const numericalMetricKeys = Object.keys(metricConfig);
     
     const metricSampleCounts: Record<string, number> = {};
@@ -1024,10 +1270,12 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       
       if (tasksWithMetric.length > 0) {
         const sum = tasksWithMetric.reduce((sum, t) => sum + (Number(t[metric as keyof TaskResult]) || 0), 0);
-        const avg = sum / tasksWithMetric.length;
-        numericalMetrics[metric] = avg;
+        numericalMetrics[metric] = {
+          totalScore: sum,
+          count: tasksWithMetric.length
+        };
         metricSampleCounts[metric] = tasksWithMetric.length;
-        console.log(`   ✅ Moyenne "${metric}": ${avg.toFixed(2)}/10 (${tasksWithMetric.length} tâches, somme: ${sum})`);
+        console.log(`   ✅ Moyenne "${metric}": ${(sum / tasksWithMetric.length).toFixed(2)}/10 (${tasksWithMetric.length} tâches, somme: ${sum})`);
       } else {
         console.log(`   ⚠️ Aucune tâche avec la métrique "${metric}"`);
       }
@@ -1191,18 +1439,20 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     if (categoricalStats.autonomy) {
       const totalAutonomy = Object.entries(categoricalStats.autonomy).reduce((sum, [, count]) => sum + count, 0);
       const aloneCount = categoricalStats.autonomy['autonomous'] || 0;
+      const autonomyRate = (aloneCount / totalAutonomy) * 100;
       if (aloneCount / totalAutonomy >= 0.7) {
-        strengths.push('Forte autonomie des utilisateurs');
+        strengths.push(`Forte autonomie des utilisateurs (${autonomyRate.toFixed(0)}%)`);
       } else if (aloneCount / totalAutonomy < 0.5) {
-        improvements.push('Autonomie faible - trop d\'aide nécessaire');
+        improvements.push(`Autonomie faible - trop d'aide nécessaire (${autonomyRate.toFixed(0)}%)`);
       }
     }
 
     if (categoricalStats.emotionalReaction) {
       const positiveCount = categoricalStats.emotionalReaction['positive'] || 0;
       const totalEmotional = Object.values(categoricalStats.emotionalReaction).reduce((sum, count) => sum + count, 0);
+      const positiveRate = (positiveCount / totalEmotional) * 100;
       if (positiveCount / totalEmotional < 0.5) {
-        improvements.push('Réactions émotionnelles à surveiller');
+        improvements.push(`Réactions émotionnelles à surveiller (${positiveRate.toFixed(0)}% positives)`);
       }
     }
 
@@ -1508,19 +1758,19 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         </div>
                         <div className="text-3xl mb-2">
                           <span className={`${
-                            stats.numericalMetrics.ease >= 8 ? 'text-[var(--success)]' : 
-                            stats.numericalMetrics.ease >= 6 ? 'text-[var(--warning)]' : 
+                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 8 ? 'text-[var(--success)]' : 
+                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 6 ? 'text-[var(--warning)]' : 
                             'text-[var(--destructive)]'
                           }`}>
-                            {stats.numericalMetrics.ease.toFixed(1)}
+                            {(stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count).toFixed(1)}
                           </span>
                           <span className="text-lg text-[var(--muted-foreground)]">/10</span>
                         </div>
                         <Progress 
-                          value={stats.numericalMetrics.ease * 10} 
+                          value={(stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) * 10} 
                           variant={
-                            stats.numericalMetrics.ease >= 8 ? "success" : 
-                            stats.numericalMetrics.ease >= 6 ? "warning" : 
+                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 8 ? "success" : 
+                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 6 ? "warning" : 
                             "destructive"
                           } 
                           className="h-1.5" 
@@ -2228,260 +2478,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           )}
 
           {/* ============================================ */}
-          {/* SECTION 3: PRIORISATION DES ACTIONS */}
-          {/* ============================================ */}
-          {sessions.length > 0 && (
-            <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
-              <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
-                <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
-                    <Target className="w-6 h-6 text-[var(--accent-foreground)]" />
-                  </div>
-                  <div>
-                    <h2 className="text-[var(--accent-foreground)]">Priorisation des actions</h2>
-                    <p className="text-[var(--accent-foreground)]/70">Matrice Impact / Effort pour guider vos améliorations</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 space-y-6">
-                {(() => {
-                  // Extraire les actions à partir des pain points et quick wins
-                  interface PrioritizedAction {
-                    title: string;
-                    description: string;
-                    impact: 'high' | 'low';
-                    effort: 'high' | 'low';
-                    estimatedTime?: string;
-                    affectedTasks?: string[];
-                    usersImpacted?: number;
-                  }
-
-                  const actions: PrioritizedAction[] = [];
-
-                  // Analyser les tâches pour détecter automatiquement des actions
-                  // Basé sur le taux de réussite et les observations
-                  Object.entries(stats.taskStats).forEach(([taskId, taskStat]) => {
-                    const successRate = (taskStat.successCount / taskStat.totalAttempts) * 100;
-                    const taskTitle = taskStat.title;
-                    
-                    // Collecter les feedbacks pour cette tâche
-                    const taskFeedbacks = sessions.flatMap(s => 
-                      s.tasks.filter(t => t.taskId === parseInt(taskId))
-                    );
-                    
-                    const frustrationCount = taskFeedbacks.filter(t => 
-                      t.emotionalReaction === 'frustrated' || t.emotionalReaction === 'confused'
-                    ).length;
-                    
-                    const needsHelpCount = taskFeedbacks.filter(t => 
-                      t.autonomy === 'with-help' || t.autonomy === 'failed'
-                    ).length;
-
-                    // Tâche avec taux de succès < 50% = Impact élevé
-                    if (successRate < 50 && frustrationCount >= 2) {
-                      actions.push({
-                        title: `Refonte navigation : ${taskTitle}`,
-                        description: `${frustrationCount} participants frustrés, ${successRate.toFixed(0)}% de réussite`,
-                        impact: 'high',
-                        effort: 'high',
-                        estimatedTime: '2-3 semaines',
-                        affectedTasks: [taskTitle],
-                        usersImpacted: frustrationCount
-                      });
-                    }
-
-                    // Tâche avec besoin d'aide fréquent mais réussite > 50%
-                    if (successRate >= 50 && successRate < 80 && needsHelpCount >= 3) {
-                      actions.push({
-                        title: `Ajouter tooltips/guidage : ${taskTitle}`,
-                        description: `${needsHelpCount} participants ont besoin d'aide`,
-                        impact: 'high',
-                        effort: 'low',
-                        estimatedTime: '1-2 jours',
-                        affectedTasks: [taskTitle],
-                        usersImpacted: needsHelpCount
-                      });
-                    }
-
-                    // Tâche qui fonctionne bien (>80%) avec petits détails à peaufiner
-                    if (successRate >= 80 && taskFeedbacks.length > 0) {
-                      const minorIssues = taskFeedbacks.filter(t => 
-                        t.pathFluidity === 'hesitant' && t.success
-                      ).length;
-
-                      if (minorIssues > 0 && minorIssues < 3) {
-                        actions.push({
-                          title: `Micro-amélioration UX : ${taskTitle}`,
-                          description: `${minorIssues} légères hésitations détectées`,
-                          impact: 'low',
-                          effort: 'low',
-                          estimatedTime: '1-2 heures',
-                          affectedTasks: [taskTitle],
-                          usersImpacted: minorIssues
-                        });
-                      }
-                    }
-                  });
-
-                  // Ajouter des actions générales basées sur les patterns globaux
-                  const allFeedbacks = sessions.flatMap(s => s.tasks);
-                  const totalSearchBarUsers = allFeedbacks.filter(t => Array.isArray(t.searchMethod) && t.searchMethod.includes('search-bar')).length;
-                  const totalVisualNavUsers = allFeedbacks.filter(t => Array.isArray(t.searchMethod) && t.searchMethod.includes('visual-catalog')).length;
-                  
-                  if (totalSearchBarUsers > 0 && totalVisualNavUsers > 0) {
-                    const searchBarSuccess = allFeedbacks.filter(t => Array.isArray(t.searchMethod) && t.searchMethod.includes('search-bar') && t.success).length / totalSearchBarUsers * 100;
-                    const visualNavSuccess = allFeedbacks.filter(t => Array.isArray(t.searchMethod) && t.searchMethod.includes('visual-catalog') && t.success).length / totalVisualNavUsers * 100;
-                    
-                    if (Math.abs(searchBarSuccess - visualNavSuccess) > 20) {
-                      const betterMethod = searchBarSuccess > visualNavSuccess ? 'Barre de recherche' : 'Navigation visuelle';
-                      actions.push({
-                        title: `Promouvoir la ${betterMethod}`,
-                        description: `${Math.abs(searchBarSuccess - visualNavSuccess).toFixed(0)}% d'écart de réussite entre les méthodes`,
-                        impact: 'high',
-                        effort: 'low',
-                        estimatedTime: '1 jour',
-                        usersImpacted: Math.min(totalSearchBarUsers, totalVisualNavUsers)
-                      });
-                    }
-                  }
-
-                  // Si aucune action détectée
-                  if (actions.length === 0) {
-                    return (
-                      <Alert className="border-[var(--accent)]/20 bg-[var(--accent)]/5">
-                        <Info className="h-4 w-4 text-[var(--accent)]" />
-                        <AlertTitle className="text-[var(--accent)]\">Excellentes performances !</AlertTitle>
-                        <AlertDescription className="text-[var(--muted-foreground)]">
-                          Aucune action prioritaire détectée. Votre application fonctionne très bien ! Continuez à monitorer les prochains tests.
-                        </AlertDescription>
-                      </Alert>
-                    );
-                  }
-
-                  // Organiser les actions par quadrant
-                  const quickWins = actions.filter(a => a.impact === 'high' && a.effort === 'low');
-                  const majorProjects = actions.filter(a => a.impact === 'high' && a.effort === 'high');
-                  const niceToHave = actions.filter(a => a.impact === 'low' && a.effort === 'low');
-                  const toAvoid = actions.filter(a => a.impact === 'low' && a.effort === 'high');
-
-                  interface QuadrantProps {
-                    title: string;
-                    actions: PrioritizedAction[];
-                    color: string;
-                    borderColor: string;
-                    icon: any;
-                    bgColor: string;
-                  }
-
-                  const Quadrant = ({ title, actions, color, borderColor, icon: Icon, bgColor }: QuadrantProps) => (
-                    <div 
-                      className={`p-5 rounded-[var(--radius-lg)] border-2 ${bgColor}`}
-                      style={{ borderColor }}
-                    >
-                      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-[var(--border)]">
-                        <Icon className={`w-5 h-5 ${color}`} />
-                        <h3 className={`${color}`}>{title}</h3>
-                        <Badge variant="outline" className="ml-auto">{actions.length}</Badge>
-                      </div>
-
-                      {actions.length === 0 ? (
-                        <p className="text-sm text-[var(--muted-foreground)] italic">Aucune action dans cette catégorie</p>
-                      ) : (
-                        <div className="space-y-3">
-                          {actions.map((action, idx) => (
-                            <div 
-                              key={idx}
-                              className="p-3 bg-white rounded-[var(--radius)] border border-[var(--border)]"
-                            >
-                              <div className="flex items-start justify-between gap-2 mb-1">
-                                <h4 className="text-sm text-[var(--foreground)]">{action.title}</h4>
-                                {action.estimatedTime && (
-                                  <Badge variant="secondary" className="shrink-0 text-xs">
-                                    <Clock className="w-3 h-3 mr-1" />
-                                    {action.estimatedTime}
-                                  </Badge>
-                                )}
-                              </div>
-                              <p className="text-xs text-[var(--muted-foreground)]">{action.description}</p>
-                              {action.usersImpacted && (
-                                <div className="flex items-center gap-1 mt-2">
-                                  <Users className="w-3 h-3 text-[var(--muted-foreground)]" />
-                                  <span className="text-xs text-[var(--muted-foreground)]">
-                                    {action.usersImpacted} utilisateur{action.usersImpacted > 1 ? 's' : ''} impacté{action.usersImpacted > 1 ? 's' : ''}
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-
-                  return (
-                    <div className="space-y-6">
-                      {/* Description de la matrice */}
-                      <Alert className="border-[var(--accent)]/20 bg-[var(--accent)]/5">
-                        <Info className="h-4 w-4 text-[var(--accent)]" />
-                        <AlertTitle className="text-[var(--accent)]">Comment utiliser cette matrice ?</AlertTitle>
-                        <AlertDescription className="text-[var(--muted-foreground)]">
-                          Cette matrice organise les améliorations suggérées selon leur impact utilisateur et l'effort de mise en œuvre. 
-                          Commencez par les <span className="text-[var(--success)]">Quick Wins</span>, puis tacklez les <span className="text-[var(--warning)]">Projets majeurs</span>.
-                        </AlertDescription>
-                      </Alert>
-
-                      {/* Grille 2x2 */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {/* QUADRANT 1: Quick Wins (Impact élevé / Effort faible) */}
-                        <Quadrant
-                          title="🚀 Quick Wins"
-                          actions={quickWins}
-                          color="text-[var(--success)]"
-                          borderColor="var(--success)"
-                          icon={CheckCircle2}
-                          bgColor="bg-[var(--success)]/5"
-                        />
-
-                        {/* QUADRANT 2: Projets majeurs (Impact élevé / Effort élevé) */}
-                        <Quadrant
-                          title="🔴 Projets majeurs"
-                          actions={majorProjects}
-                          color="text-[var(--warning)]"
-                          borderColor="var(--warning)"
-                          icon={AlertTriangle}
-                          bgColor="bg-[var(--warning)]/5"
-                        />
-
-                        {/* QUADRANT 3: Nice to have (Impact faible / Effort faible) */}
-                        <Quadrant
-                          title="💡 Nice to Have"
-                          actions={niceToHave}
-                          color="text-[var(--info)]"
-                          borderColor="var(--info)"
-                          icon={Lightbulb}
-                          bgColor="bg-[var(--info)]/5"
-                        />
-
-                        {/* QUADRANT 4: À éviter (Impact faible / Effort élevé) */}
-                        <Quadrant
-                          title="⚠️ À éviter"
-                          actions={toAvoid}
-                          color="text-[var(--muted-foreground)]"
-                          borderColor="var(--border)"
-                          icon={XCircle}
-                          bgColor="bg-[var(--muted)]/30"
-                        />
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            </div>
-          )}
-
-          {/* ============================================ */}
-          {/* SECTION 4: SYNTHÈSE QUALITATIVE */}
+          {/* SECTION 3: SYNTHÈSE QUALITATIVE */}
           {/* ============================================ */}
           <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
             <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">

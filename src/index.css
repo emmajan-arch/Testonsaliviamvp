@@ -1599,16 +1599,6 @@
     background-color: var(--info);
   }
 
-  .bg-\[var\(--info\)\]\/5 {
-    background-color: var(--info);
-  }
-
-  @supports (color: color-mix(in lab, red, red)) {
-    .bg-\[var\(--info\)\]\/5 {
-      background-color: color-mix(in oklab, var(--info) 5%, transparent);
-    }
-  }
-
   .bg-\[var\(--input-background\)\] {
     background-color: var(--input-background);
   }
@@ -1665,16 +1655,6 @@
     background-color: var(--success);
   }
 
-  .bg-\[var\(--success\)\]\/5 {
-    background-color: var(--success);
-  }
-
-  @supports (color: color-mix(in lab, red, red)) {
-    .bg-\[var\(--success\)\]\/5 {
-      background-color: color-mix(in oklab, var(--success) 5%, transparent);
-    }
-  }
-
   .bg-\[var\(--success\)\]\/10 {
     background-color: var(--success);
   }
@@ -1697,16 +1677,6 @@
 
   .bg-\[var\(--warning\)\] {
     background-color: var(--warning);
-  }
-
-  .bg-\[var\(--warning\)\]\/5 {
-    background-color: var(--warning);
-  }
-
-  @supports (color: color-mix(in lab, red, red)) {
-    .bg-\[var\(--warning\)\]\/5 {
-      background-color: color-mix(in oklab, var(--warning) 5%, transparent);
-    }
   }
 
   .bg-\[var\(--warning\)\]\/10 {
@@ -1937,10 +1907,6 @@
 
   .p-4 {
     padding: calc(var(--spacing) * 4);
-  }
-
-  .p-5 {
-    padding: calc(var(--spacing) * 5);
   }
 
   .p-6 {
@@ -2254,10 +2220,6 @@
 
   .text-\[var\(--foreground\)\] {
     color: var(--foreground);
-  }
-
-  .text-\[var\(--info\)\] {
-    color: var(--info);
   }
 
   .text-\[var\(--info-foreground\)\] {
