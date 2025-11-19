@@ -1,0 +1,10 @@
+Looking for:
+Line 1011:                        </div>
+Line 1012:                      </div>
+Line 1013:                      
+Line 1014:                      <div className={isOptionalTask && currentTaskData.skipped ? 'opacity-40 pointer-events-none' : ''}>
+Line 1015:                        {/* Task Success */}
+
+Need to add:
+- `)}` after line 1012
+- `{currentTask !== 0 && (` before line 1014
