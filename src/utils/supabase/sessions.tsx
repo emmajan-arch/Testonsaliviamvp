@@ -38,7 +38,7 @@ export interface TaskResult {
   clicks?: number;
   hesitations?: number;
   errorsCount?: number;
-  skipped?: boolean; // Pour marquer une tâche comme non effectuée (optionnelle - tâche 10)
+  skipped?: boolean; // Deprecated - toutes les tâches sont maintenant obligatoires (1-9)
 }
 
 export interface TestSession {
@@ -58,6 +58,11 @@ export interface TestSession {
   recordingUrl?: string;
   transcription?: string;
   timestamps?: VideoTimestamp[];
+  /**
+   * Alias éventuel pour l'URL vidéo.
+   * Dans la plupart des cas, recordingUrl joue déjà ce rôle.
+   */
+  videoUrl?: string;
 }
 
 // Fetch all sessions from Supabase

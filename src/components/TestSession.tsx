@@ -225,26 +225,6 @@ const defaultTestTasks = [
     ],
     tip: 'C\'est le moment de synthèse : laissez le participant s\'exprimer librement. Encouragez-le à partager ses vraies impressions sans filtre. Les insights les plus précieux viennent souvent ici.',
     metricsFields: ['postTestQuestions', 'notes']
-  },
-  {
-    id: 10,
-    title: 'Créer un assistant',
-    icon: 'PlusCircle',
-    description: 'Processus de création d\'un nouvel assistant (Tâche facultative)',
-    scenario: 'Créez un nouvel assistant dédié aux documents financiers Polycea.',
-    tasks: [
-      'Logique suivie pour créer',
-      'Compréhension du processus (sources, langue, nom, rôle)',
-      'Sentiment de complexité vs simplicité',
-    ],
-    metrics: [
-      'Intuitivité du processus',
-      'Compréhension des étapes',
-      'Satisfaction',
-    ],
-    tip: 'Cette tâche est plus avancée et facultative : observez l\'ordre des étapes choisies par le participant (nom > sources > langue ou autre ?). Notez s\'il se sent perdu ou au contraire guidé par l\'interface.',
-    metricsFields: ['taskVerbatimsPositive', 'taskVerbatimsNegative', 'success', 'duration', 'autonomy', 'pathFluidity', 'emotionalReaction', 'notes', 'ease'],
-    optional: true
   }
 ];
 
@@ -263,10 +243,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         const { optional, ...cleanedTask } = task;
         return cleanedTask;
       }
-      // Forcer "Créer un assistant" (tâche 10) à TOUJOURS être optionnelle
-      if (task.title?.includes('Créer un assistant')) {
-        return { ...task, optional: true };
-      }
+      // La tâche 10 "Créer un assistant" a été supprimée - plus de tâches optionnelles
       return task;
     });
   };
@@ -385,7 +362,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         verbatim: '',
         taskVerbatimsPositive: '',
         taskVerbatimsNegative: '',
-        // Ease uniquement pour les tâches 2-8 et 10 (pas découverte, pas post-test, pas bonus si bonus)
+        // Ease uniquement pour les tâches 2-8 (pas découverte, pas post-test)
         ease: (!isDiscovery && !isPostTest && !isBonus) ? 5 : undefined,
         searchMethod: [],
         sourcesUnderstanding: 5,
@@ -578,11 +555,11 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   const progress = ((currentTask + 1) / testTasks.length) * 100;
   const currentTaskObj = testTasks[currentTask];
   
-  // UNIQUEMENT la tâche 10 (Questions Post-Test) affiche les questions post-test
+  // UNIQUEMENT la tâche 9 (Questions Post-Test) affiche les questions post-test
   // On se base sur l'ID 10 car même si le titre est modifié dans le protocole, l'ID reste stable
   const isPostTestTask = currentTaskObj?.id === 10;
   
-  // Seules les tâches marquées optional: true sont facultatives (tâche 10 "Créer un assistant")
+  // Toutes les tâches (1-9) sont maintenant obligatoires - plus de tâches optionnelles
   // On détecte par : propriété optional OU titre qui contient "Créer un assistant"
   const isOptionalTask = currentTaskObj?.optional === true || 
                          currentTaskObj?.title?.includes('Créer un assistant');
@@ -1053,7 +1030,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                   </div>
                 )}
 
-                {/* Pour les tâches 2-8 et 10: Afficher les métriques standard */}
+                {/* Pour les tâches 2-8: Afficher les métriques standard */}
                 {currentTaskObj?.id !== 1 && (
                   <>
                     {/* DYNAMIC FIELDS BASED ON CONFIG */}
@@ -1196,9 +1173,11 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                        />
                     </div>
 
-                    {/* Standard Ease Metric - UNIQUEMENT pour tâches 2-8 (pas découverte, pas post-test, pas bonus) */}
-                    {currentTaskObj?.id !== 9 && 
+                    {/* Standard Ease Metric - UNIQUEMENT pour tâches 2-8 (pas découverte, pas post-test) */}
+                    {currentTaskObj?.id !== 1 &&
+                     currentTaskObj?.id !== 9 && 
                      !currentTaskObj?.title?.includes('Questions Post-Test') &&
+                     !currentTaskObj?.title?.includes('Phase de découverte') &&
                      !currentTaskObj?.optional && (
                     <div className="space-y-3 pt-2 border-t border-[var(--border)]">
                       <Label>Facilité</Label>

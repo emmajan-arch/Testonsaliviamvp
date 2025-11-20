@@ -529,26 +529,6 @@ const testTasks = [
     ],
     tip: "C'est le moment de synthèse : laissez le participant s'exprimer librement. Encouragez-le à partager ses vraies impressions sans filtre. Les insights les plus précieux viennent souvent ici.",
   },
-  {
-    id: 10,
-    title: "Créer un assistant",
-    icon: "PlusCircle",
-    description: "Processus de création d'un nouvel assistant (Tâche facultative)",
-    scenario:
-      "Créez un nouvel assistant dédié aux documents financiers Polycea.",
-    tasks: [
-      "Logique suivie pour créer",
-      "Compréhension du processus (sources, langue, nom, rôle)",
-      "Sentiment de complexité vs simplicité",
-    ],
-    metrics: [
-      "Intuitivité du processus",
-      "Compréhension des étapes",
-      "Satisfaction",
-    ],
-    tip: "Cette tâche est plus avancée et facultative : observez l'ordre des étapes choisies par le participant (nom > sources > langue ou autre ?). Notez s'il se sent perdu ou au contraire guidé par l'interface.",
-    optional: true,
-  },
 ];
 
 // Type pour le drag & drop

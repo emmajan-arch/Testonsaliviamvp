@@ -40,7 +40,7 @@ interface TaskResult {
   emotionalReaction?: string;
   searchMethod?: string[]; // Sélection multiple
   // Métrique numérique (échelle 1-10)
-  ease?: number; // Facilité - collectée uniquement pour tâches 2-8
+  ease?: number; // Facilité - collectée pour tâches 2-8 (pas pour découverte ni post-test)
   valuePropositionClarity?: number; // Compréhension d'Alivia - collectée uniquement pour tâche 1 (Phase de découverte)
   firstImpression?: number; // Premières impressions - collectée uniquement pour tâche 1 (Phase de découverte)
   // Champs texte
@@ -54,7 +54,7 @@ interface TaskResult {
   postTestDataStorage?: string;
   postTestPracticalUse?: string;
   postTestAdoption?: number; // Score d'adoption (échelle 1-10) : "A quel point vous voyez utiliser le produit au quotidien ?"
-  skipped?: boolean; // Pour marquer une tâche comme non effectuée (optionnelle - "Créer un assistant" - tâche 10)
+  skipped?: boolean; // Deprecated - toutes les tâches sont maintenant obligatoires (1-9)
 }
 
 interface TestSession {
@@ -210,16 +210,74 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       const syncedSessions = await syncWithSupabase();
       console.log('📥 Sessions chargées depuis Supabase:', syncedSessions.length, 'sessions');
       
-      // 🔧 MIGRATION: Nettoyer les données des sessions existantes
-      const migratedSessions = syncedSessions.map(session => ({
-        ...session,
-        tasks: session.tasks.map(task => {
-          const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
-          const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
-          const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+      // 🔧 MIGRATION: Nettoyer les données des sessions existantes et corriger les IDs
+      const migratedSessions = syncedSessions.map(session => {
+        // 🔄 ÉTAPE 1 : Récupérer le score d'adoption de la tâche 10 (si elle existe)
+        const task10 = session.tasks.find(t => {
+          const title = t.title?.toLowerCase() || '';
+          return t.taskId === 10 || title.includes('créer un assistant') || title.includes('bonus');
+        });
+        const adoptionFromTask10 = task10?.postTestAdoption;
+        
+        if (adoptionFromTask10 !== undefined && adoptionFromTask10 !== null) {
+          console.log(`🔄 Migration: Session ${session.id} - Score d'adoption ${adoptionFromTask10} récupéré de la tâche 10`);
+        }
+        
+        return {
+          ...session,
+          tasks: session.tasks
+            .filter(task => {
+              // 🗑️ SUPPRIMER DÉFINITIVEMENT LA TÂCHE 10 (BONUS "Créer un assistant")
+              const title = task.title?.toLowerCase() || '';
+              const isTask10 = task.taskId === 10 || title.includes('créer un assistant') || title.includes('bonus');
+              if (isTask10) {
+                console.log(`🗑️ Suppression de la tâche 10 (BONUS): "${task.title}"`);
+                return false; // Exclure cette tâche
+              }
+              return true; // Garder toutes les autres tâches
+            })
+            .map(task => {
+          // 🔧 CORRECTION DES IDs BASÉE SUR LES TITRES (Tâches 1-9 uniquement)
+          let correctedTaskId = task.taskId;
+          const title = task.title?.toLowerCase() || '';
+          
+          // Ordre important : vérifier les cas spécifiques d'abord
+          if (title.includes('questions post-test') || title.includes('post-test') || title.includes('débriefing')) {
+            correctedTaskId = 9;
+          } else if (title.includes('historique') || title.includes("trouver l'historique") || title.includes('trouver l\'historique')) {
+            correctedTaskId = 8;
+          } else if (title.includes('choisir les sources') || title.includes('sources nécessaires')) {
+            correctedTaskId = 7;
+          } else if (title.includes('paramétrer un assistant') || title.includes('paramétrer')) {
+            correctedTaskId = 6;
+          } else if (title.includes("changer d'assistant") || title.includes('changer d\'assistant')) {
+            correctedTaskId = 5;
+          } else if (title.includes('vérifier la confiance') || title.includes('confiance dans la réponse')) {
+            correctedTaskId = 4;
+          } else if (title.includes('envoyer une requête') || title.includes('obtenir une réponse')) {
+            correctedTaskId = 3;
+          } else if (title.includes('trouver le bon assistant')) {
+            correctedTaskId = 2;
+          } else if (title.includes('phase de découverte') || title.includes('découverte')) {
+            correctedTaskId = 1;
+          }
+          
+          // Log pour debug
+          if (task.taskId !== correctedTaskId) {
+            console.log(`🔧 ID corrigé pour "${task.title}": ${task.taskId} → ${correctedTaskId}`);
+          }
+          
+          const isDiscovery = correctedTaskId === 1;
+          const isPostTest = correctedTaskId === 9;
           
           // Nettoyer les métriques incorrectes
-          const cleanedTask = { ...task };
+          const cleanedTask = { ...task, taskId: correctedTaskId };
+          
+          // 🔧 IMPORTANT : Supprimer le flag skipped de toutes les tâches (la tâche 10 n'existe plus)
+          if (cleanedTask.skipped) {
+            console.log(`🔧 Correction: La tâche #${correctedTaskId} "${task.title}" ne devrait pas être skipped`);
+            delete cleanedTask.skipped;
+          }
           
           // Pour la tâche Découverte : supprimer ease, garder valuePropositionClarity et firstImpression
           if (isDiscovery) {
@@ -228,11 +286,18 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
             delete cleanedTask.autonomy;
             delete cleanedTask.pathFluidity;
           }
-          // Pour Questions Post-Test et bonus : supprimer ease
-          else if (isPostTest || isBonus) {
+          // Pour Questions Post-Test : supprimer ease, MAIS ajouter le score d'adoption de la tâche 10 si disponible
+          else if (isPostTest) {
             delete cleanedTask.ease;
+            
+            // 🔄 MIGRER le score d'adoption de la tâche 10 vers la tâche 9
+            if (adoptionFromTask10 !== undefined && adoptionFromTask10 !== null && 
+                (cleanedTask.postTestAdoption === undefined || cleanedTask.postTestAdoption === null)) {
+              cleanedTask.postTestAdoption = adoptionFromTask10;
+              console.log(`✅ Migration: Tâche 9 - Score d'adoption ${adoptionFromTask10} ajouté depuis la tâche 10`);
+            }
           }
-          // Pour les tâches standards : supprimer valuePropositionClarity et firstImpression
+          // Pour les tâches standards (2-8) : supprimer valuePropositionClarity et firstImpression
           else {
             delete cleanedTask.valuePropositionClarity;
             delete cleanedTask.firstImpression;
@@ -240,17 +305,36 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           
           return cleanedTask;
         })
-      }));
+        };
+      });
       
-      syncedSessions.forEach((s, idx) => {
+      // Log des corrections d'IDs
+      migratedSessions.forEach((s, idx) => {
         console.log(`Session ${idx + 1}:`, {
           id: s.id,
           participant: s.participant.name,
           date: s.date,
           nbTasks: s.tasks?.length || 0,
-          tasksIds: s.tasks?.map(t => t.taskId) || []
+          tasksIds: s.tasks?.map(t => `#${t.taskId}: ${t.title}`) || []
         });
       });
+      
+      // 🔧 SAUVEGARDER LES SESSIONS MIGRÉES DANS SUPABASE
+      // Cela garantit que les corrections (IDs, suppression de skipped, suppression tâche 10) sont persistées
+      const saveMigratedSessions = async () => {
+        for (const session of migratedSessions) {
+          try {
+            await updateSession(session.id, { tasks: session.tasks });
+            console.log(`✅ Session ${session.id} (${session.participant.name}) sauvegardée avec les corrections`);
+          } catch (error) {
+            console.error(`❌ Erreur lors de la sauvegarde de la session ${session.id}:`, error);
+          }
+        }
+      };
+      
+      // Sauvegarder en arrière-plan (ne pas bloquer l'affichage)
+      saveMigratedSessions();
+      
       setSessions(migratedSessions);
     } catch (error) {
       console.error('Error loading sessions:', error);
@@ -261,6 +345,93 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       toast.error('Erreur de chargement cloud. Données locales affichées.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // 🚨 FONCTION DE RESTAURATION : Créer/restaurer la tâche 9 avec les scores d'adoption
+  const handleRestoreAdoptionScores = async () => {
+    setIsSyncing(true);
+    try {
+      console.log('🔧 DÉBUT DE LA RESTAURATION DE LA TÂCHE 9 + SCORES D\'ADOPTION');
+      
+      // Mapping des scores d'adoption par participant
+      const adoptionScores: Record<string, number> = {
+        'louis': 10,
+        'charles': 10,
+        'anne': 7,
+        'lucas': 4
+      };
+      
+      let restoredCount = 0;
+      
+      for (const session of sessions) {
+        const participantName = session.participant.name.toLowerCase();
+        
+        // Trouver le score correspondant au participant
+        let adoptionScore = 5; // Valeur par défaut
+        for (const [name, score] of Object.entries(adoptionScores)) {
+          if (participantName.includes(name)) {
+            adoptionScore = score;
+            break;
+          }
+        }
+        
+        // Vérifier si la tâche 9 existe déjà
+        const hasTask9 = session.tasks.some(t => 
+          t.taskId === 9 || 
+          t.title?.toLowerCase().includes('questions post-test')
+        );
+        
+        let updatedTasks = [...session.tasks];
+        
+        if (!hasTask9) {
+          // Créer la tâche 9 "Questions Post-Test"
+          const newTask9 = {
+            taskId: 9,
+            title: 'Questions Post-Test',
+            success: true,
+            notes: '',
+            postTestAdoption: adoptionScore,
+            postTestImpression: '',
+            postTestLiked: '',
+            postTestFrustrations: '',
+            postTestDataStorage: '',
+            postTestPracticalUse: ''
+          };
+          
+          updatedTasks.push(newTask9);
+          console.log(`➕ Session ${session.id} (${session.participant.name}) - Tâche 9 créée avec score ${adoptionScore}/10`);
+        } else {
+          // Mettre à jour la tâche 9 existante
+          updatedTasks = updatedTasks.map(task => {
+            const isPostTest = task.taskId === 9 || 
+                              task.title?.toLowerCase().includes('questions post-test');
+            
+            if (isPostTest) {
+              console.log(`🔧 Session ${session.id} (${session.participant.name}) - Tâche 9 mise à jour avec score ${adoptionScore}/10`);
+              return {
+                ...task,
+                postTestAdoption: adoptionScore
+              };
+            }
+            
+            return task;
+          });
+        }
+        
+        await updateSession(session.id, { tasks: updatedTasks });
+        restoredCount++;
+        console.log(`✅ Session ${session.id} (${session.participant.name}) - Score ${adoptionScore}/10 sauvegardé`);
+      }
+      
+      console.log(`✅ RESTAURATION TERMINÉE - ${restoredCount} sessions modifiées`);
+      toast.success(`✅ Tâche 9 restaurée pour ${restoredCount} sessions avec les scores d'adoption !`);
+      await loadSessions();
+    } catch (error) {
+      console.error('❌ Erreur lors de la restauration:', error);
+      toast.error('Erreur lors de la restauration. Vérifie la console.');
+    } finally {
+      setIsSyncing(false);
     }
   };
 
@@ -1457,15 +1628,41 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     }
 
     // Calcul du score d'adoption moyen (collecté dans la tâche 9 - Questions Post-Test)
-    // Ne prendre en compte que les tâches 10 avec un score d'adoption renseigné (tâche Questions Post-Test)
+    // Chercher dans TOUTES les tâches qui contiennent "Questions Post-Test" dans le titre
     console.log('📊 ===== ANALYSE SCORE D\'ADOPTION =====');
-    console.log('📊 Toutes les tâches:', allTasks.map(t => ({ sessionId: sessions.find((s: any) => s.tasks?.some((st: any) => st === t))?.id, taskId: t.taskId, adoption: t.postTestAdoption })));
-    const tasksWithAdoption = allTasks.filter(t => t.taskId === 10 && t.postTestAdoption !== undefined && t.postTestAdoption !== null);
-    console.log('📊 Score d\'adoption - Tâches 10 (Questions Post-Test) avec postTestAdoption:', tasksWithAdoption.map(t => ({ id: t.taskId, adoption: t.postTestAdoption })));
+    
+    // Debug: afficher toutes les tâches avec leur titre et taskId
+    allTasks.forEach((t, idx) => {
+      if (t.title?.toLowerCase().includes('post-test') || t.title?.toLowerCase().includes('post test') || t.taskId === 9) {
+        console.log(`🔍 Tâche Post-Test trouvée:`, {
+          index: idx,
+          taskId: t.taskId,
+          title: t.title,
+          postTestAdoption: t.postTestAdoption,
+          hasAdoption: t.postTestAdoption !== undefined && t.postTestAdoption !== null
+        });
+      }
+    });
+    
+    // Chercher les scores d'adoption dans les tâches Post-Test (peu importe le taskId)
+    const tasksWithAdoption = allTasks.filter(t => {
+      const isPostTest = t.taskId === 9 || 
+                        t.title?.toLowerCase().includes('post-test') || 
+                        t.title?.toLowerCase().includes('post test') ||
+                        t.title?.toLowerCase().includes('questions post');
+      const hasAdoption = t.postTestAdoption !== undefined && t.postTestAdoption !== null;
+      return isPostTest && hasAdoption;
+    });
+    
+    console.log(`📊 ${tasksWithAdoption.length} tâches Post-Test avec score d'adoption trouvées`);
+    tasksWithAdoption.forEach(t => {
+      console.log(`  ✅ Tâche #${t.taskId} "${t.title}" - Score: ${t.postTestAdoption}/10`);
+    });
+    
     const adoptionScore = tasksWithAdoption.length > 0
       ? tasksWithAdoption.reduce((sum, t) => sum + (t.postTestAdoption || 0), 0) / tasksWithAdoption.length
       : null;
-    console.log('📊 Score d\'adoption final:', adoptionScore?.toFixed(2));
+    console.log('📊 Score d\'adoption final:', adoptionScore !== null ? `${adoptionScore.toFixed(2)}/10` : 'N/A');
     console.log('📊 ===== FIN ANALYSE =====');
 
     // Insights sur le score d'adoption
@@ -2987,25 +3184,30 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                           <div>
                             <span className="text-[var(--muted-foreground)]">Tâches réussies: </span>
                             <span className="text-[var(--foreground)]">
-                              {session.tasks.filter(t => t.success).length}/{session.tasks.length}
+                              {session.tasks.filter(t => !t.skipped && t.success).length}/{session.tasks.filter(t => !t.skipped).length}
                             </span>
                           </div>
                         </div>
 
                         <div className="space-y-4">
-                        {session.tasks.map((task, idx) => (
-                          <div key={idx} className={`border-l-4 ${task.success ? 'border-green-500' : 'border-red-500'} pl-4 py-2 bg-[var(--muted)]/20 rounded-r-[var(--radius)] space-y-2 ${task.skipped ? 'border-amber-400 opacity-75' : ''}`}>
+                        {(() => {
+                          const visibleTasks = session.tasks.filter(task => !task.skipped);
+                          const skippedTasks = session.tasks.filter(task => task.skipped);
+                          
+                          if (skippedTasks.length > 0) {
+                            console.log(`⚠️ Session ${session.id} (${session.participant.name}) - Tâches skipped:`, 
+                              skippedTasks.map(t => `#${t.taskId}: ${t.title}`)
+                            );
+                          }
+                          
+                          return visibleTasks;
+                        })().map((task, idx) => (
+                          <div key={idx} className={`border-l-4 ${task.success ? 'border-green-500' : 'border-red-500'} pl-4 py-2 bg-[var(--muted)]/20 rounded-r-[var(--radius)] space-y-2`}>
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                {task.skipped ? (
-                                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-300">
-                                    Non effectuée
-                                  </Badge>
-                                ) : (
-                                  <Badge variant={task.success ? "default" : "destructive"} className={task.success ? 'bg-green-600' : ''}>
-                                    {task.success ? 'Réussite' : 'Échec'}
-                                  </Badge>
-                                )}
+                                <Badge variant={task.success ? "default" : "destructive"} className={task.success ? 'bg-green-600' : ''}>
+                                  {task.success ? 'Réussite' : 'Échec'}
+                                </Badge>
                                 <span className="text-xs text-[var(--muted-foreground)]">#{task.taskId}</span>
                                 <span className="text-[var(--foreground)]">{removeEmojis(task.title)}</span>
                               </div>
@@ -3016,21 +3218,33 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                               // Récupérer dynamiquement toutes les métriques numériques disponibles
                               const allMetricKeys = Object.keys(metricConfig);
                               const allowedMetrics = allMetricKeys.filter(metricId => {
-                                // La métrique "ease" (Facilité) ne s'affiche PAS pour : 
+                                // La métrique "ease" (Facilité) s'affiche pour les tâches 2-8
+                                // Elle ne s'affiche PAS pour : 
                                 // - Découverte du produit (tâche 1)
-                                // - Questions Post-Test
-                                // - Créer un assistant (tâche bonus)
-                                const isPostTest = task.title?.includes('Questions Post-Test');
-                                const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
-                                const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+                                // - Questions Post-Test (tâche 9)
+                                const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
+                                const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte') || task.title?.includes('découverte');
                                 
-                                if (metricId === 'ease' && (isDiscovery || isPostTest || isBonus)) {
+                                if (metricId === 'ease' && (isDiscovery || isPostTest)) {
                                   return false;
                                 }
                                 
                                 const value = task[metricId as keyof TaskResult];
-                                return typeof value === 'number';
+                                const hasValue = typeof value === 'number';
+                                
+                                // Debug log pour ease
+                                if (metricId === 'ease' && task.taskId === 8) {
+                                  console.log(`🔍 Tâche #${task.taskId} "${task.title}": ease=${value}, hasValue=${hasValue}, isDiscovery=${isDiscovery}, isPostTest=${isPostTest}`);
+                                }
+                                
+                                return hasValue;
                               });
+                              
+                              // Debug: afficher les métriques autorisées
+                              if (task.taskId === 8) {
+                                console.log(`📊 Tâche #8 - Métriques autorisées:`, allowedMetrics);
+                                console.log(`📊 Tâche #8 - Valeurs:`, allowedMetrics.map(m => ({ [m]: task[m as keyof TaskResult] })));
+                              }
                               
                               return (
                                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">

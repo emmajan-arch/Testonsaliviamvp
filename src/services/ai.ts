@@ -2,47 +2,38 @@ import { ensureGroqClient } from "../groqClient";
 import type { TestSession } from "../utils/supabase/sessions";
 
 /**
- * Concatène toutes les notes et verbatims pertinentes d'une session
- * pour alimenter le prompt IA.
+ * Construit un bloc de transcription pour une session,
+ * basé UNIQUEMENT sur ce que dit et fait l'utilisateur.
  */
-function extractNotesFromSession(session: TestSession): string {
-  const parts: string[] = [];
+function extractTranscriptionFromSession(
+  session: TestSession,
+  index: number
+): string {
+  const headerLines: string[] = [];
 
-  if (session.generalObservations) {
-    parts.push(`Observations générales: ${session.generalObservations}`);
+  const participantName = session.participant?.name || "Participant inconnu";
+  const participantRole = session.participant?.role || "Rôle inconnu";
+  const hasVideo = Boolean(session.recordingUrl || (session as any).videoUrl);
+
+  headerLines.push(`Session ${index + 1} (id: ${session.id})`);
+  headerLines.push(
+    `Participant: ${participantName} — Rôle: ${participantRole}`
+  );
+  headerLines.push(`Vidéo associée: ${hasVideo ? "oui" : "non"}`);
+
+  const transcription = session.transcription?.trim();
+
+  if (!transcription) {
+    headerLines.push(
+      "Transcription: [Aucune transcription fournie pour cette session]"
+    );
+    return headerLines.join("\n");
   }
 
-  for (const task of session.tasks) {
-    const taskParts: string[] = [];
+  headerLines.push("Transcription :");
+  headerLines.push(transcription);
 
-    if (task.title) {
-      taskParts.push(`Tâche: ${task.title}`);
-    }
-    if (task.notes) {
-      taskParts.push(`Notes: ${task.notes}`);
-    }
-    if (task.verbatim) {
-      taskParts.push(`Verbatim: ${task.verbatim}`);
-    }
-    if (task.taskVerbatimsPositive) {
-      taskParts.push(`Points positifs: ${task.taskVerbatimsPositive}`);
-    }
-    if (task.taskVerbatimsNegative) {
-      taskParts.push(`Points négatifs: ${task.taskVerbatimsNegative}`);
-    }
-    if (task.postTestFrustrations) {
-      taskParts.push(`Frustrations: ${task.postTestFrustrations}`);
-    }
-    if (task.postTestImpression) {
-      taskParts.push(`Impression finale: ${task.postTestImpression}`);
-    }
-
-    if (taskParts.length > 0) {
-      parts.push(taskParts.join(" | "));
-    }
-  }
-
-  return parts.join("\n");
+  return headerLines.join("\n");
 }
 
 /**
@@ -72,7 +63,7 @@ export async function analyzeCommonConcernsForStudy(
   }
 
   const allNotes = sessionsForStudy
-    .map((session) => extractNotesFromSession(session))
+    .map((session, index) => extractTranscriptionFromSession(session, index))
     .filter(Boolean)
     .join("\n\n---\n\n");
 
@@ -83,40 +74,19 @@ export async function analyzeCommonConcernsForStudy(
   const client = ensureGroqClient();
 
   const systemPrompt = [
-    "Tu es un·e UX Researcher senior, habitué·e à rédiger des rapports de test utilisateur clairs, structurés et actionnables pour des équipes Produit, Design et Tech.",
+    "Tu es un·e UX Researcher principal·e.",
     "",
-    "Je te fournis des notes provenant de plusieurs sessions d’une même étude : observations, verbatims, confusions, comportements, signaux faibles, etc.",
-    "Tu dois produire une analyse complète, limpide, professionnelle et immédiatement exploitable.",
+    "Je te fournis les transcriptions brutes de plusieurs sessions de test utilisateur (texte issu de fichiers importés ou transcriptions manuelles).",
+    "Ne prends PAS en compte les notes internes du chercheur, seulement ce que les utilisateurs disent et font réellement.",
     "",
-    "Ta réponse doit être structurée en 4 sections principales :",
+    "À partir de ces transcriptions, génère une analyse complète et actionnable structurée en 3 parties :",
     "",
-    "1. 🟢 **Ce qui fonctionne bien (Points positifs)**",
-    "   - Liste claire et hiérarchisée des éléments qui ont réellement bien fonctionné.",
-    "   - Insiste sur les comportements positifs répétés et les éléments intuitifs.",
-    "   - Donne des exemples concrets (verbalisations, comportements observés).",
-    "   - Objectif : faire ressortir les forces du produit de manière concise et utile.",
+    "1. Points positifs",
+    "2. Points de frictions majeurs",
+    "3. Améliorations suggérées + Next Steps",
     "",
-    "2. 🔴 **Ce qui pose problème (Points de frictions majeurs)**",
-    "   - Analyse les irritants récurrents, incompréhensions, blocages, hésitations.",
-    "   - Regroupe les frictions par thèmes (ex : compréhension, navigation, feedbacks, charge cognitive, attentes, confiance, etc.).",
-    "   - Explique POURQUOI ces frictions apparaissent (causes profondes, mécanismes UX).",
-    "   - Ajoute 1–2 verbatims reformulés par friction pour incarner l’insight.",
-    "",
-    "3. 🟣 **Comment améliorer (Améliorations suggérées + Next Steps)**",
-    "   - Pour CHAQUE point de friction important, propose :",
-    "     - une ou plusieurs améliorations UX concrètes,",
-    "     - leur pertinence (ce problème résout quoi),",
-    "     - leur impact potentiel (H/M/L si utile),",
-    "     - les risques si rien n’est fait.",
-    "   - Termine par une liste de **Next Steps clairs et opérationnels** :",
-    "     - 3 à 6 actions immédiates que l’équipe peut entreprendre,",
-    "     - ordonnées dans un ordre logique (quick wins → améliorations structurelles).",
-    "   - L’objectif est que l’équipe sache “quoi faire demain”.",
-    "",
-    "4. 🟠 **Synthèse essentielle (3 lignes maximum)**",
-    "   - Les 2–3 idées clés à retenir absolument.",
-    "   - Une phrase sur l’état général de l’expérience utilisateur.",
-    "   - Une phrase sur la direction produit recommandée.",
+    "Pour chaque friction, identifie les causes profondes et propose des recommandations concrètes et priorisées.",
+    "Réponds uniquement sur la base des transcriptions fournies.",
     "",
     "Contraintes :",
     "- Réponds en français.",
@@ -128,7 +98,9 @@ export async function analyzeCommonConcernsForStudy(
   const userPrompt = [
     `ID de l'étude : ${studyId}`,
     "",
-    "Voici les notes et verbatims bruts issus des sessions de test de cette étude :",
+    "Les blocs suivants sont les transcriptions brutes des sessions de test utilisateur de cette étude.",
+    "Chaque bloc correspond à une session distincte, avec indication du participant et de la présence éventuelle d'une vidéo associée.",
+    "",
     allNotes,
   ].join("\n\n");
 
