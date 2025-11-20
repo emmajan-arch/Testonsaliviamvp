@@ -630,4 +630,58 @@ app.post("/make-server-a80e52b7/protocol/sections", async (c) => {
   }
 });
 
+// ========== STUDY METADATA ROUTES ==========
+
+// Get current study metadata
+app.get("/make-server-a80e52b7/study", async (c) => {
+  try {
+    let study = await kv.get("alivia:study:current");
+
+    if (!study) {
+      const now = new Date().toISOString();
+      study = {
+        id: "alivia_default_study",
+        title: "Étude UX Alivia V2",
+        createdAt: now,
+        updatedAt: now,
+      };
+      await kv.set("alivia:study:current", study);
+    }
+
+    return c.json({ study });
+  } catch (error) {
+    console.error("Error fetching study metadata:", error);
+    return c.json(
+      { error: "Failed to fetch study metadata", details: String(error) },
+      500,
+    );
+  }
+});
+
+// Create/update current study metadata
+app.post("/make-server-a80e52b7/study", async (c) => {
+  try {
+    const body = await c.req.json();
+    const existing = await kv.get("alivia:study:current");
+    const now = new Date().toISOString();
+
+    const study = {
+      id: body.id || existing?.id || "alivia_default_study",
+      title: body.title || existing?.title || "Étude sans titre",
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+
+    await kv.set("alivia:study:current", study);
+
+    return c.json({ study });
+  } catch (error) {
+    console.error("Error saving study metadata:", error);
+    return c.json(
+      { error: "Failed to save study metadata", details: String(error) },
+      500,
+    );
+  }
+});
+
 Deno.serve(app.fetch);

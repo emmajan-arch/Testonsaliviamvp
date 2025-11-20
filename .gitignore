@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+
+# Fichiers d'environnement (ne jamais commiter de secrets)
+.env
+.env.local
+.env.*
+
+
