@@ -1,12 +1,14 @@
-import { useState, useEffect } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
+import React, { useState, useEffect } from 'react';
+import { Tabs, TabsContent } from './components/ui/tabs';
 import { ProtocolView } from './components/ProtocolView';
 import { TestSession } from './components/TestSession';
 import { ResultsView } from './components/ResultsView';
+import PresentationView from './components/PresentationView';
 import { AliviaLogo } from './components/AliviaLogo';
 import { LoginScreen, UserRole } from './components/LoginScreen';
-import { ClipboardList, PlayCircle, BarChart3, LogOut, Shield, Eye } from 'lucide-react';
+import { ClipboardList, PlayCircle, BarChart3, Presentation, LogOut, Shield, Eye, ChevronLeft, ChevronRight, Plus, FlaskConical, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { syncWithSupabase } from './utils/supabase/sessions';
 import emmaAvatar from 'figma:asset/16d25bac4bc2165deddd3aadc01d6675f6dc94fa.png';
 
 export default function App() {
@@ -14,6 +16,61 @@ export default function App() {
   const [userRole, setUserRole] = useState<UserRole>('viewer');
   const [activeTab, setActiveTab] = useState('protocol');
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null);
+  const [protocol, setProtocol] = useState<any>(null);
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [currentTestId, setCurrentTestId] = useState('test-1');
+
+  // Mock tests list (prêt pour le multi-test)
+  const tests = [
+    { id: 'test-1', name: 'Test UX Alivia V2', date: 'En cours' }
+  ];
+
+  // Charger le protocole et les sessions
+  useEffect(() => {
+    const loadData = async () => {
+      // Charger le protocole
+      const savedProtocol = JSON.parse(localStorage.getItem('testProtocol') || 'null');
+      setProtocol(savedProtocol);
+
+      // Charger les sessions depuis Supabase
+      try {
+        const syncedSessions = await syncWithSupabase();
+        console.log('📥 Sessions chargées dans App:', syncedSessions.length, 'sessions');
+        setSessions(syncedSessions);
+      } catch (error) {
+        console.error('Error loading sessions in App:', error);
+        // Fallback to localStorage
+        const localSessions = JSON.parse(localStorage.getItem('testSessions') || '[]');
+        setSessions(localSessions);
+      }
+    };
+    loadData();
+
+    // Écouter les changements dans localStorage
+    const handleStorageChange = () => loadData();
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  // Recharger les données quand on change d'onglet vers présentation
+  useEffect(() => {
+    if (activeTab === 'presentation') {
+      const loadData = async () => {
+        const savedProtocol = JSON.parse(localStorage.getItem('testProtocol') || 'null');
+        setProtocol(savedProtocol);
+        
+        try {
+          const syncedSessions = await syncWithSupabase();
+          console.log('🔄 Rechargement des sessions pour présentation:', syncedSessions.length);
+          setSessions(syncedSessions);
+        } catch (error) {
+          console.error('Error reloading sessions:', error);
+        }
+      };
+      loadData();
+    }
+  }, [activeTab]);
 
   // Vérifier si l'utilisateur est déjà authentifié au chargement
   useEffect(() => {
@@ -25,6 +82,18 @@ export default function App() {
     }
   }, []);
 
+  // Auto-collapse sidebar sur mobile
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setSidebarCollapsed(true);
+      }
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const handleEditSession = (sessionId: number) => {
     setEditingSessionId(sessionId);
     setActiveTab('session');
@@ -33,6 +102,17 @@ export default function App() {
   const handleSessionComplete = () => {
     setEditingSessionId(null);
     setActiveTab('results');
+    // Recharger les sessions depuis Supabase après sauvegarde
+    const reloadSessions = async () => {
+      try {
+        const syncedSessions = await syncWithSupabase();
+        console.log('🔄 Sessions rechargées après sauvegarde:', syncedSessions.length);
+        setSessions(syncedSessions);
+      } catch (error) {
+        console.error('Error reloading sessions:', error);
+      }
+    };
+    reloadSessions();
   };
 
   const handleLogin = (role: UserRole) => {
@@ -53,43 +133,157 @@ export default function App() {
 
   return (
     <div 
-      className="min-h-screen"
+      className="min-h-screen flex"
       style={{ background: 'linear-gradient(270deg, #FFF9F9 6.5%, #FDF9FC 33.54%, #FAF9FF 73.35%, #F5F6FF 99.86%)' }}
     >
-      {/* NAVBAR STICKY FULL-WIDTH */}
-      <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b-2 border-[var(--accent)]/10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 md:px-8 py-4">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-1">
-              <AliviaLogo className="w-8 h-8 md:w-10 md:h-10" />
-              <div className="h-10 md:h-12 w-px bg-[var(--accent)]/20 mx-2" />
-              <div className="text-left">
-                <h1 className="text-[var(--foreground)]">Protocole de Test UX</h1>
-                <p className="text-[var(--muted-foreground)] text-sm font-normal">
-                  Outils de test utilisateur pour Alivia V2
+      {/* ============================================ */}
+      {/* SIDEBAR */}
+      {/* ============================================ */}
+      <aside 
+        className={`fixed left-0 top-0 h-screen bg-white border-r border-sidebar-border z-40 transition-all duration-300 flex flex-col shadow-sm ${
+          sidebarCollapsed ? 'w-16' : 'w-64'
+        }`}
+      >
+        {/* Sidebar Header */}
+        <div className="px-4 border-b border-sidebar-border flex items-center justify-between h-[73px]">
+          {!sidebarCollapsed ? (
+            <>
+              <div className="flex items-center gap-2.5">
+                <AliviaLogo className="w-7 h-7 flex-shrink-0" />
+                <span className="text-sidebar-foreground font-medium">
+                  Alivia <span style={{ color: '#A6002D' }}>♥</span> users
+                </span>
+              </div>
+              <button
+                onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+                className="p-1.5 hover:bg-sidebar-accent rounded-[var(--radius-sm)] transition-all"
+                title="Réduire la sidebar"
+              >
+                <PanelLeftClose className="w-5 h-5 text-sidebar-foreground" />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="p-1.5 hover:bg-sidebar-accent rounded-[var(--radius-sm)] transition-all mx-auto"
+              title="Ouvrir la sidebar"
+            >
+              <PanelLeft className="w-5 h-5 text-sidebar-foreground" />
+            </button>
+          )}
+        </div>
+
+        {/* Navigation Tabs */}
+        <div className="flex-1 overflow-y-auto p-3 space-y-1 mt-4">
+          <button
+            onClick={() => setActiveTab('protocol')}
+            className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all ${
+              activeTab === 'protocol'
+                ? 'bg-[var(--accent)] text-white shadow-md'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent'
+            } ${sidebarCollapsed ? 'flex justify-center' : ''}`}
+            title={sidebarCollapsed ? 'Protocole' : ''}
+          >
+            {sidebarCollapsed ? (
+              <ClipboardList className="w-5 h-5" />
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <ClipboardList className="w-4 h-4 flex-shrink-0" />
+                <span style={{ fontSize: 'var(--text-sm)' }}>Protocole</span>
+              </div>
+            )}
+          </button>
+
+          {userRole !== 'viewer' && (
+            <button
+              onClick={() => setActiveTab('session')}
+              className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all ${
+                activeTab === 'session'
+                  ? 'bg-[var(--accent)] text-white shadow-md'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent'
+              } ${sidebarCollapsed ? 'flex justify-center' : ''}`}
+              title={sidebarCollapsed ? 'Session' : ''}
+            >
+              {sidebarCollapsed ? (
+                <PlayCircle className="w-5 h-5" />
+              ) : (
+                <div className="flex items-center gap-2.5">
+                  <PlayCircle className="w-4 h-4 flex-shrink-0" />
+                  <span style={{ fontSize: 'var(--text-sm)' }}>Session</span>
+                </div>
+              )}
+            </button>
+          )}
+
+          <button
+            onClick={() => setActiveTab('results')}
+            className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all ${
+              activeTab === 'results'
+                ? 'bg-[var(--accent)] text-white shadow-md'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent'
+            } ${sidebarCollapsed ? 'flex justify-center' : ''}`}
+            title={sidebarCollapsed ? 'Résultats' : ''}
+          >
+            {sidebarCollapsed ? (
+              <BarChart3 className="w-5 h-5" />
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <BarChart3 className="w-4 h-4 flex-shrink-0" />
+                <span style={{ fontSize: 'var(--text-sm)' }}>Résultats</span>
+              </div>
+            )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('presentation')}
+            className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all ${
+              activeTab === 'presentation'
+                ? 'bg-[var(--accent)] text-white shadow-md'
+                : 'text-sidebar-foreground hover:bg-sidebar-accent'
+            } ${sidebarCollapsed ? 'flex justify-center' : ''}`}
+            title={sidebarCollapsed ? 'Présentation' : ''}
+          >
+            {sidebarCollapsed ? (
+              <Presentation className="w-5 h-5" />
+            ) : (
+              <div className="flex items-center gap-2.5">
+                <Presentation className="w-4 h-4 flex-shrink-0" />
+                <span style={{ fontSize: 'var(--text-sm)' }}>Présentation</span>
+              </div>
+            )}
+          </button>
+        </div>
+
+        {/* Sidebar Footer - User Info */}
+        <div className="p-4 border-t border-sidebar-border bg-sidebar-accent/30">
+          {!sidebarCollapsed ? (
+            <div className="flex items-center gap-3">
+              <img 
+                src={emmaAvatar}
+                alt="Emma Jan"
+                className="w-9 h-9 rounded-[var(--radius-md)] flex-shrink-0 ring-1 ring-sidebar-border"
+              />
+              <div className="flex-1 min-w-0">
+                <p className="text-sidebar-foreground truncate" style={{ fontSize: 'var(--text-sm)' }}>
+                  Emma Jan
+                </p>
+                <p className="text-sidebar-foreground/60" style={{ fontSize: 'var(--text-xs)' }}>
+                  Product designer
                 </p>
               </div>
-            </div>
-            <div className="hidden md:flex items-center gap-4">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
-                    className={`inline-flex items-center justify-center rounded-[var(--radius-md)] border px-2.5 py-1 text-xs w-fit whitespace-nowrap gap-1.5 cursor-pointer hover:opacity-80 transition-opacity focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                    className={`inline-flex items-center justify-center rounded-[var(--radius-sm)] border px-2 py-1.5 cursor-pointer hover:opacity-90 transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-1 ${
                       userRole === 'admin' 
-                        ? 'bg-[var(--accent)] text-white border-[var(--accent)] focus:ring-[var(--accent)]'
-                        : 'bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)] focus:ring-[var(--accent)]'
+                        ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                        : 'bg-sidebar-accent text-sidebar-foreground border-sidebar-border'
                     }`}
                   >
                     {userRole === 'admin' ? (
-                      <>
-                        <Shield className="w-3.5 h-3.5" />
-                        Admin
-                      </>
+                      <Shield className="w-3.5 h-3.5" />
                     ) : (
-                      <>
-                        <Eye className="w-3.5 h-3.5" />
-                        Viewer
-                      </>
+                      <Eye className="w-3.5 h-3.5" />
                     )}
                   </button>
                 </DropdownMenuTrigger>
@@ -103,66 +297,109 @@ export default function App() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <div className="h-10 w-px bg-[var(--accent)]/20" />
-              <div className="flex items-center gap-3">
-                <p className="text-[var(--muted-foreground)] text-sm font-normal text-right">
-                  © Emma Jan<br />
-                  Product designer @ Alivia
-                </p>
-                <img 
-                  src={emmaAvatar}
-                  alt="Emma Jan"
-                  className="h-14 rounded-[var(--radius-md)]"
-                />
-              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2">
+              <img 
+                src={emmaAvatar}
+                alt="Emma Jan"
+                className="w-9 h-9 rounded-[var(--radius-md)] ring-1 ring-sidebar-border"
+              />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className={`inline-flex items-center justify-center rounded-[var(--radius-sm)] border p-1.5 cursor-pointer hover:opacity-90 transition-all focus:outline-none focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-1 ${
+                      userRole === 'admin' 
+                        ? 'bg-[var(--accent)] text-white border-[var(--accent)]'
+                        : 'bg-sidebar-accent text-sidebar-foreground border-sidebar-border'
+                    }`}
+                  >
+                    {userRole === 'admin' ? (
+                      <Shield className="w-3.5 h-3.5" />
+                    ) : (
+                      <Eye className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  <DropdownMenuItem 
+                    onClick={handleLogout}
+                    className="gap-2 text-[var(--destructive)] focus:text-[var(--destructive)] focus:bg-[var(--destructive)]/5 cursor-pointer"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Déconnexion
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
         </div>
-      </header>
+      </aside>
 
-      {/* CONTENU PRINCIPAL */}
-      <div className="max-w-7xl mx-auto p-4 md:p-8">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className={`grid w-full mb-6 bg-white/80 backdrop-blur-sm p-2 rounded-[var(--radius-lg)] border border-[var(--accent)]/10 shadow-sm h-auto ${userRole === 'viewer' ? 'grid-cols-2' : 'grid-cols-3'}`}>
-            <TabsTrigger value="protocol" className="flex items-center justify-center gap-2 h-auto py-3 px-4 data-[state=active]:bg-[var(--accent)] data-[state=active]:text-white data-[state=active]:shadow-md transition-all">
-              <ClipboardList className="w-4 h-4" />
-              <span className="hidden sm:inline">Protocole</span>
-            </TabsTrigger>
-            {userRole !== 'viewer' && (
-              <TabsTrigger 
-                value="session" 
-                className="flex items-center justify-center gap-2 h-auto py-3 px-4 data-[state=active]:bg-[var(--accent)] data-[state=active]:text-white data-[state=active]:shadow-md transition-all"
-              >
-                <PlayCircle className="w-4 h-4" />
-                <span className="hidden sm:inline font-normal">Session</span>
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="results" className="flex items-center justify-center gap-2 h-auto py-3 px-4 data-[state=active]:bg-[var(--accent)] data-[state=active]:text-white data-[state=active]:shadow-md transition-all">
-              <BarChart3 className="w-4 h-4" />
-              <span className="hidden sm:inline">Résultats</span>
-            </TabsTrigger>
-          </TabsList>
+      {/* ============================================ */}
+      {/* MAIN CONTENT */}
+      {/* ============================================ */}
+      <div className={`flex-1 transition-all duration-300 ${sidebarCollapsed ? 'ml-16' : 'ml-64'}`}>
+        {/* Header simplifié */}
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-[var(--border)] h-[73px]">
+          <div className="px-8 h-full flex items-center justify-between">
+            <div>
+              <h1 className="text-[var(--foreground)] text-[20px] font-bold">
+                {tests.find(t => t.id === currentTestId)?.name || 'Test UX'}
+              </h1>
+              <p className="text-[var(--muted-foreground)]" style={{ fontSize: 'var(--text-sm)' }}>
+                Outils de test utilisateur pour Alivia V2
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border ${
+              userRole === 'admin' 
+                ? 'bg-[var(--accent)]/5 text-[var(--accent)] border-[var(--accent)]/20'
+                : 'bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)]'
+            }`} style={{ fontSize: 'var(--text-xs)' }}>
+              {userRole === 'admin' ? (
+                <>
+                  <Shield className="w-3 h-3" />
+                  Admin
+                </>
+              ) : (
+                <>
+                  <Eye className="w-3 h-3" />
+                  Viewer
+                </>
+              )}
+            </span>
+          </div>
+        </header>
 
-          <TabsContent value="protocol">
-            <ProtocolView isReadOnly={userRole === 'viewer'} />
-          </TabsContent>
+        {/* Content Area - Sans les Tabs UI */}
+        <main className="p-8">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+            <TabsContent value="protocol" className="mt-0">
+              <ProtocolView isReadOnly={userRole === 'viewer'} />
+            </TabsContent>
 
-          <TabsContent value="session">
-            <TestSession 
-              onSessionComplete={handleSessionComplete}
-              editingSessionId={editingSessionId}
-              isReadOnly={userRole === 'viewer'}
-            />
-          </TabsContent>
+            <TabsContent value="session" className="mt-0">
+              <TestSession 
+                onSessionComplete={handleSessionComplete}
+                editingSessionId={editingSessionId}
+                isReadOnly={userRole === 'viewer'}
+              />
+            </TabsContent>
 
-          <TabsContent value="results">
-            <ResultsView 
-              onEditSession={handleEditSession} 
-              isActive={activeTab === 'results'} 
-              isReadOnly={userRole === 'viewer'}
-            />
-          </TabsContent>
-        </Tabs>
+            <TabsContent value="results" className="mt-0">
+              <ResultsView 
+                onEditSession={handleEditSession} 
+                isActive={activeTab === 'results'} 
+                isReadOnly={userRole === 'viewer'}
+                sidebarCollapsed={sidebarCollapsed}
+              />
+            </TabsContent>
+
+            <TabsContent value="presentation" className="mt-0">
+              <PresentationView protocol={protocol} sessions={sessions} isReadOnly={userRole === 'viewer'} />
+            </TabsContent>
+          </Tabs>
+        </main>
       </div>
     </div>
   );

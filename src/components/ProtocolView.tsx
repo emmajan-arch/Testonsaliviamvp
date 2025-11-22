@@ -529,26 +529,6 @@ const testTasks = [
     ],
     tip: "C'est le moment de synthèse : laissez le participant s'exprimer librement. Encouragez-le à partager ses vraies impressions sans filtre. Les insights les plus précieux viennent souvent ici.",
   },
-  {
-    id: 10,
-    title: "Créer un assistant",
-    icon: "PlusCircle",
-    description: "Processus de création d'un nouvel assistant (Tâche facultative)",
-    scenario:
-      "Créez un nouvel assistant dédié aux documents financiers Polycea.",
-    tasks: [
-      "Logique suivie pour créer",
-      "Compréhension du processus (sources, langue, nom, rôle)",
-      "Sentiment de complexité vs simplicité",
-    ],
-    metrics: [
-      "Intuitivité du processus",
-      "Compréhension des étapes",
-      "Satisfaction",
-    ],
-    tip: "Cette tâche est plus avancée et facultative : observez l'ordre des étapes choisies par le participant (nom > sources > langue ou autre ?). Notez s'il se sent perdu ou au contraire guidé par l'interface.",
-    optional: true,
-  },
 ];
 
 // Type pour le drag & drop
@@ -1540,6 +1520,80 @@ export function ProtocolView({ isReadOnly = false }: ProtocolViewProps) {
 
   return (
     <div className="space-y-6">
+      {/* Bannière de correction du Score d'adoption - Admin seulement */}
+      {!isReadOnly && (() => {
+        const needsFix = (() => {
+          try {
+            const savedProtocol = localStorage.getItem('testProtocol');
+            if (!savedProtocol) return false;
+            const protocol = JSON.parse(savedProtocol);
+            const task9 = protocol.tasks?.find((t: any) => t.id === 9);
+            return task9 && (!task9.metricsFields || !task9.metricsFields.includes('postTestAdoption'));
+          } catch {
+            return false;
+          }
+        })();
+        
+        if (needsFix) {
+          return (
+            <div className="bg-gradient-to-r from-red-50 to-orange-50 border-2 border-red-300 rounded-[var(--radius-lg)] p-4 shadow-md">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-start gap-3 flex-1">
+                  <AlertCircle className="w-6 h-6 text-red-600 shrink-0 mt-1" />
+                  <div className="space-y-2">
+                    <p className="text-red-900 font-medium">⚠️ Score d'adoption manquant</p>
+                    <p className="text-sm text-red-800">
+                      Le champ "Score d'adoption" n'est pas configuré dans la tâche 9 "Questions Post-Test".
+                      Cliquez sur "Restaurer" pour le rétablir automatiquement.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => {
+                    try {
+                      toast.loading('Restauration en cours...');
+                      const { fixProtocolTask9 } = await import('../utils/fix-protocol');
+                      const result = await fixProtocolTask9();
+                      
+                      toast.dismiss();
+                      
+                      if (result.success && result.needsReload) {
+                        toast.success('✅ Score d\'adoption restauré !', {
+                          description: 'Le protocole a été corrigé. Rechargez la page.',
+                          duration: 10000,
+                          action: {
+                            label: 'Recharger maintenant',
+                            onClick: () => window.location.reload()
+                          }
+                        });
+                      } else if (result.success && !result.needsReload) {
+                        toast.info('Le protocole est déjà correct');
+                        setTimeout(() => window.location.reload(), 1500);
+                      } else {
+                        toast.error('Erreur', {
+                          description: result.message
+                        });
+                      }
+                    } catch (error) {
+                      toast.dismiss();
+                      console.error('Erreur restauration:', error);
+                      toast.error('Erreur lors de la restauration', {
+                        description: String(error)
+                      });
+                    }
+                  }}
+                  className="px-4 py-2 bg-red-600 text-white rounded-[var(--radius-md)] hover:bg-red-700 transition-colors flex items-center gap-2 whitespace-nowrap shrink-0"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Restaurer
+                </button>
+              </div>
+            </div>
+          );
+        }
+        return null;
+      })()}
+
       <Card className="shadow-sm border-[var(--border)] mt-[0px] mr-[0px] mb-[24px] ml-[0px]">
         <CardHeader className="bg-[var(--accent)] rounded-t-[var(--radius-lg)] p-[24px]">
           <CardTitle className="text-[var(--accent-foreground)]">

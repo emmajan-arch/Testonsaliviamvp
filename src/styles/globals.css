@@ -146,7 +146,7 @@
 
   body {
     @apply text-foreground;
-    background: linear-gradient(270deg, #FFF9F9 6.5%, #FDF9FC 33.54%, #FAF9FF 73.35%, #F5F6FF 99.86%);
+    background: var(--background);
     background-attachment: fixed;
   }
 }
@@ -208,4 +208,13 @@
 
 html {
   font-size: var(--font-size);
+}
+
+/* Hide scrollbar for navigation pills */
+.scrollbar-hide {
+  -ms-overflow-style: none;  /* IE and Edge */
+  scrollbar-width: none;  /* Firefox */
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;  /* Chrome, Safari and Opera */
 }

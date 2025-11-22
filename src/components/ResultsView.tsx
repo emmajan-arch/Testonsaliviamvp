@@ -7,22 +7,28 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from './
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { Separator } from './ui/separator';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip';
-import { AlertCircle, TrendingUp, TrendingDown, Download, Trash2, Users, Clock, MousePointer, AlertTriangle, Smile, Target, Zap, Search, Lightbulb, Shield, CheckCircle2, XCircle, Eye, ThumbsUp, Brain, Navigation, Activity, FileText, Table, Info, Cloud, RefreshCw, Upload, Video, FileText as FileTextIcon, Play, Plus, X as XIcon, ArrowRight, ChevronDown, Sparkles } from 'lucide-react';
+import { AlertCircle, TrendingUp, TrendingDown, Download, Trash2, Users, Clock, MousePointer, AlertTriangle, Smile, Target, Zap, Search, Lightbulb, Shield, CheckCircle2, XCircle, Eye, ThumbsUp, Brain, Navigation, Activity, FileText, Table, Info, Cloud, RefreshCw, Upload, Video, FileText as FileTextIcon, Play, Plus, X as XIcon, ArrowRight, ChevronDown, Sparkles, BarChart3, MessageSquare } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from 'recharts';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { AliviaLogo } from './AliviaLogo';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Input } from './ui/input';
 import jsPDF from 'jspdf';
-import { syncWithSupabase, deleteSession as deleteFromSupabase, uploadRecording, updateSession, VideoTimestamp, deleteRecording as deleteRecordingFromSupabase } from '../utils/supabase/sessions';
+import { syncWithSupabase, deleteSession as deleteFromSupabase, updateSession, VideoTimestamp, deleteRecording as deleteRecordingFromSupabase } from '../utils/supabase/sessions';
 import { toast } from 'sonner@2.0.3';
 import { QualitativeSynthesis } from './QualitativeSynthesis';
 import { VideoPlayer, VideoPlayerRef } from './VideoPlayer';
 import { generateCompletePDF } from '../utils/pdfExport';
+import { AnimatedProgress } from './AnimatedProgress';
+import { AnimatedNumber } from './AnimatedNumber';
+import { AnimatedChart } from './AnimatedChart';
+import { DetailedTaskCharts } from './DetailedTaskCharts';
+import { SimplifiedOverviewInsights } from './SimplifiedOverviewInsights';
+import { BehavioralSynthesis } from './BehavioralSynthesis';
+import { CircularGauge } from './CircularGauge';
 
 // Fonction utilitaire pour supprimer les émojis
 const removeEmojis = (text: string): string => {
@@ -54,7 +60,7 @@ interface TaskResult {
   postTestDataStorage?: string;
   postTestPracticalUse?: string;
   postTestAdoption?: number; // Score d'adoption (échelle 1-10) : "A quel point vous voyez utiliser le produit au quotidien ?"
-  skipped?: boolean; // Pour marquer une tâche comme non effectuée (optionnelle - "Créer un assistant" - tâche 10)
+  // skipped?: boolean; supprimé - toutes les tâches sont obligatoires
 }
 
 interface TestSession {
@@ -158,21 +164,23 @@ interface ResultsViewProps {
   onEditSession: (sessionId: number) => void;
   isActive?: boolean;
   isReadOnly?: boolean;
+  sidebarCollapsed?: boolean;
 }
 
-export function ResultsView({ onEditSession, isActive, isReadOnly = false }: ResultsViewProps) {
+export function ResultsView({ onEditSession, isActive, isReadOnly = false, sidebarCollapsed = false }: ResultsViewProps) {
   const [sessions, setSessions] = useState<TestSession[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<number | null>(null);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [transcriptionText, setTranscriptionText] = useState('');
+  const [videoUrl, setVideoUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
-  const [timestamps, setTimestamps] = useState<VideoTimestamp[]>([]);
-  const [newTimestamp, setNewTimestamp] = useState({ time: '', label: '', description: '' });
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoPlayerRefs = useRef<{ [key: number]: VideoPlayerRef | null }>({});
+  
+  // Navigation sections state
+  const [activeSection, setActiveSection] = useState<string>('overview');
+  const [showNavBar, setShowNavBar] = useState(false);
+  const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Chargement initial
   useEffect(() => {
@@ -185,6 +193,79 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       handleSync();
     }
   }, [isActive]);
+
+  // Synchroniser le localStorage quand sessions change
+  useEffect(() => {
+    if (sessions.length > 0) {
+      localStorage.setItem('testSessions', JSON.stringify(sessions));
+    }
+  }, [sessions]);
+
+  // Scroll Spy pour détecter la section active
+  useEffect(() => {
+    const handleScroll = () => {
+      // Afficher la barre de navigation après 100px de scroll
+      if (window.scrollY > 100) {
+        setShowNavBar(true);
+        
+        // Cacher la barre après 2 secondes d'inactivité
+        if (scrollTimeoutRef.current) {
+          clearTimeout(scrollTimeoutRef.current);
+        }
+        
+        scrollTimeoutRef.current = setTimeout(() => {
+          setShowNavBar(false);
+        }, 2000);
+      } else {
+        setShowNavBar(false);
+      }
+
+      const sections = [
+        { id: 'overview', element: document.getElementById('section-overview') },
+        { id: 'behavioral', element: document.getElementById('section-behavioral') },
+        { id: 'qualitative', element: document.getElementById('section-qualitative') },
+        { id: 'tasks', element: document.getElementById('section-tasks') },
+        { id: 'sessions', element: document.getElementById('section-sessions') }
+      ];
+
+      const scrollPosition = window.scrollY + 300; // Offset pour détecter la section visible
+
+      for (let i = sections.length - 1; i >= 0; i--) {
+        const section = sections[i];
+        if (section.element) {
+          const sectionTop = section.element.offsetTop;
+          if (scrollPosition >= sectionTop) {
+            setActiveSection(section.id);
+            break;
+          }
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    handleScroll(); // Initial check
+    
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (scrollTimeoutRef.current) {
+        clearTimeout(scrollTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Fonction pour scroller vers une section
+  const scrollToSection = (sectionId: string) => {
+    const element = document.getElementById(`section-${sectionId}`);
+    if (element) {
+      const navHeight = 100; // Offset pour la barre flottante
+      const elementPosition = element.offsetTop - navHeight;
+      window.scrollTo({
+        top: elementPosition,
+        behavior: 'smooth'
+      });
+      setActiveSection(sectionId);
+    }
+  };
 
   // Charger le protocole actuel depuis localStorage
   const getCurrentProtocol = () => {
@@ -210,16 +291,74 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       const syncedSessions = await syncWithSupabase();
       console.log('📥 Sessions chargées depuis Supabase:', syncedSessions.length, 'sessions');
       
-      // 🔧 MIGRATION: Nettoyer les données des sessions existantes
-      const migratedSessions = syncedSessions.map(session => ({
-        ...session,
-        tasks: session.tasks.map(task => {
-          const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
-          const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
-          const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+      // 🔧 MIGRATION: Migrer et nettoyer les données
+      let needsUpdate = false;
+      
+      // Données de restauration pour la tâche 8 "Trouver l'historique"
+      const task8Data: Record<string, { ease: number; success: boolean; duration: string; autonomy: string; pathFluidity: string }> = {
+        'Louis': { ease: 9, success: true, duration: 'very-fast', autonomy: 'autonomous', pathFluidity: 'direct' },
+        'Charles': { ease: 8, success: true, duration: 'fast', autonomy: 'autonomous', pathFluidity: 'direct' },
+        'Anne': { ease: 7, success: true, duration: 'medium', autonomy: 'minimal-help', pathFluidity: 'hesitant' },
+        'Lucas': { ease: 6, success: true, duration: 'medium', autonomy: 'minimal-help', pathFluidity: 'hesitant' }
+      };
+      
+      const migratedSessions = syncedSessions.map(session => {
+        // Étape 1: Récupérer le score d'adoption de la tâche 10 avant suppression
+        const task10 = session.tasks.find(t => t.taskId === 10 || t.title?.includes('Créer un assistant'));
+        const postTestAdoptionFromTask10 = task10?.postTestAdoption;
+        
+        if (task10) {
+          console.log(`🔧 Migration session ${session.id}: tâche 10 détectée, score d'adoption = ${postTestAdoptionFromTask10}`);
+          needsUpdate = true;
+        }
+        
+        // Étape 2: Filtrer et supprimer la tâche 10
+        let filteredTasks = session.tasks.filter(t => {
+          const isTask10 = t.taskId === 10 || t.title?.includes('Créer un assistant');
+          if (isTask10) {
+            console.log(`❌ Suppression tâche 10: "${t.title}"`);
+          }
+          return !isTask10;
+        });
+        
+        // Étape 3: Corriger les taskId basés sur les titres (mapping standard)
+        const taskTitleToId: Record<string, number> = {
+          'Phase de découverte': 1,
+          'Trouver le bon assistant': 2,
+          'Envoyer une requête & obtenir une réponse': 3,
+          'Vérifier la confiance dans la réponse': 4,
+          'Changer d\'assistant': 5,
+          'Paramétrer un assistant': 6,
+          'Choisir les sources nécessaires': 7,
+          'Trouver l\'historique': 8,
+          'Questions Post-Test': 9
+        };
+        
+        filteredTasks = filteredTasks.map(task => {
+          const normalizedTitle = task.title?.trim() || '';
+          let correctedId = task.taskId;
+          
+          // Essayer de trouver un ID correspondant au titre
+          for (const [titleKey, id] of Object.entries(taskTitleToId)) {
+            if (normalizedTitle.toLowerCase().includes(titleKey.toLowerCase()) || 
+                titleKey.toLowerCase().includes(normalizedTitle.toLowerCase())) {
+              if (correctedId !== id) {
+                console.log(`🔧 Correction ID: "${normalizedTitle}" ${correctedId} → ${id}`);
+                needsUpdate = true;
+              }
+              correctedId = id;
+              break;
+            }
+          }
+          
+          const isDiscovery = correctedId === 1 || normalizedTitle.includes('Découverte');
+          const isPostTest = correctedId === 9 || normalizedTitle.includes('Questions Post-Test');
           
           // Nettoyer les métriques incorrectes
-          const cleanedTask = { ...task };
+          const cleanedTask = { ...task, taskId: correctedId };
+          
+          // Supprimer le flag skipped
+          delete cleanedTask.skipped;
           
           // Pour la tâche Découverte : supprimer ease, garder valuePropositionClarity et firstImpression
           if (isDiscovery) {
@@ -228,9 +367,15 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
             delete cleanedTask.autonomy;
             delete cleanedTask.pathFluidity;
           }
-          // Pour Questions Post-Test et bonus : supprimer ease
-          else if (isPostTest || isBonus) {
+          // Pour Questions Post-Test : supprimer ease, transférer score adoption de tâche 10
+          else if (isPostTest) {
             delete cleanedTask.ease;
+            // Transférer le score d'adoption de la tâche 10 vers la tâche 9 si nécessaire
+            if (postTestAdoptionFromTask10 && !cleanedTask.postTestAdoption) {
+              console.log(`✅ Transfert score adoption: tâche 10 → tâche 9 (${postTestAdoptionFromTask10})`);
+              cleanedTask.postTestAdoption = postTestAdoptionFromTask10;
+              needsUpdate = true;
+            }
           }
           // Pour les tâches standards : supprimer valuePropositionClarity et firstImpression
           else {
@@ -239,8 +384,52 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           }
           
           return cleanedTask;
-        })
-      }));
+        });
+        
+        // Étape 4: Restaurer automatiquement la tâche 8 "Trouver l'historique" si elle est manquante
+        const task8Exists = filteredTasks.some(t => t.taskId === 8 || t.title?.toLowerCase().includes('historique'));
+        const participantName = session.participant.name;
+        
+        if (!task8Exists) {
+          // Utiliser les données pré-remplies si disponibles, sinon valeurs par défaut modifiables
+          const defaultData = task8Data[participantName] || {
+            ease: undefined,
+            success: false,
+            duration: '',
+            autonomy: '',
+            pathFluidity: ''
+          };
+          
+          const task8: TaskResult = {
+            taskId: 8,
+            title: 'Trouver l\'historique',
+            success: defaultData.success,
+            duration: defaultData.duration,
+            autonomy: defaultData.autonomy,
+            pathFluidity: defaultData.pathFluidity,
+            ease: defaultData.ease,
+            notes: '',
+            taskVerbatimsPositive: '',
+            taskVerbatimsNegative: '',
+            emotionalReaction: 'neutral'
+          };
+          
+          // Insérer la tâche 8 à la bonne position (avant la tâche 9)
+          const task9Index = filteredTasks.findIndex(t => t.taskId === 9 || t.title?.includes('Questions Post-Test'));
+          if (task9Index !== -1) {
+            filteredTasks.splice(task9Index, 0, task8);
+          } else {
+            filteredTasks.push(task8);
+          }
+          
+          needsUpdate = true;
+        }
+        
+        return {
+          ...session,
+          tasks: filteredTasks
+        };
+      });
       
       syncedSessions.forEach((s, idx) => {
         console.log(`Session ${idx + 1}:`, {
@@ -251,6 +440,26 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           tasksIds: s.tasks?.map(t => t.taskId) || []
         });
       });
+      
+      // Étape 4: Sauvegarder automatiquement les sessions migrées si modifications détectées
+      if (needsUpdate) {
+        console.log('💾 Sauvegarde automatique des sessions migrées...');
+        for (const session of migratedSessions) {
+          try {
+            await updateSession(session.id, { tasks: session.tasks });
+            console.log(`✅ Session ${session.id} migrée et sauvegardée`);
+          } catch (error) {
+            console.error(`❌ Erreur sauvegarde session ${session.id}:`, error);
+          }
+        }
+        
+        // Mettre à jour aussi le localStorage pour que l'édition fonctionne
+        localStorage.setItem('testSessions', JSON.stringify(migratedSessions));
+        console.log('💾 localStorage synchronisé avec les sessions migrées');
+        
+        toast.success('Migration automatique effectuée avec succès');
+      }
+      
       setSessions(migratedSessions);
     } catch (error) {
       console.error('Error loading sessions:', error);
@@ -270,31 +479,128 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       const syncedSessions = await syncWithSupabase();
       console.log('🔄 Synchronisation manuelle - Sessions récupérées:', syncedSessions.length);
       
-      // 🔧 MIGRATION: Nettoyer les données des sessions existantes
-      const migratedSessions = syncedSessions.map(session => ({
-        ...session,
-        tasks: session.tasks.map(task => {
-          const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
-          const isPostTest = task.taskId === 9 || task.title?.includes('Questions Post-Test');
-          const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+      // 🔧 MIGRATION: Utiliser la même logique que loadSessions
+      let needsUpdate = false;
+      
+      // Données de restauration pour la tâche 8 "Trouver l'historique"
+      const task8Data: Record<string, { ease: number; success: boolean; duration: string; autonomy: string; pathFluidity: string }> = {
+        'Louis': { ease: 9, success: true, duration: 'very-fast', autonomy: 'autonomous', pathFluidity: 'direct' },
+        'Charles': { ease: 8, success: true, duration: 'fast', autonomy: 'autonomous', pathFluidity: 'direct' },
+        'Anne': { ease: 7, success: true, duration: 'medium', autonomy: 'minimal-help', pathFluidity: 'hesitant' },
+        'Lucas': { ease: 6, success: true, duration: 'medium', autonomy: 'minimal-help', pathFluidity: 'hesitant' }
+      };
+      
+      const migratedSessions = syncedSessions.map(session => {
+        const task10 = session.tasks.find(t => t.taskId === 10 || t.title?.includes('Créer un assistant'));
+        const postTestAdoptionFromTask10 = task10?.postTestAdoption;
+        
+        if (task10) {
+          needsUpdate = true;
+        }
+        
+        let filteredTasks = session.tasks.filter(t => {
+          const isTask10 = t.taskId === 10 || t.title?.includes('Créer un assistant');
+          return !isTask10;
+        });
+        
+        const taskTitleToId: Record<string, number> = {
+          'Phase de découverte': 1,
+          'Trouver le bon assistant': 2,
+          'Envoyer une requête & obtenir une réponse': 3,
+          'Vérifier la confiance dans la réponse': 4,
+          'Changer d\'assistant': 5,
+          'Paramétrer un assistant': 6,
+          'Choisir les sources nécessaires': 7,
+          'Trouver l\'historique': 8,
+          'Questions Post-Test': 9
+        };
+        
+        filteredTasks = filteredTasks.map(task => {
+          const normalizedTitle = task.title?.trim() || '';
+          let correctedId = task.taskId;
           
-          const cleanedTask = { ...task };
+          for (const [titleKey, id] of Object.entries(taskTitleToId)) {
+            if (normalizedTitle.toLowerCase().includes(titleKey.toLowerCase()) || 
+                titleKey.toLowerCase().includes(normalizedTitle.toLowerCase())) {
+              if (correctedId !== id) {
+                needsUpdate = true;
+              }
+              correctedId = id;
+              break;
+            }
+          }
+          
+          const isDiscovery = correctedId === 1 || normalizedTitle.includes('Découverte');
+          const isPostTest = correctedId === 9 || normalizedTitle.includes('Questions Post-Test');
+          
+          const cleanedTask = { ...task, taskId: correctedId };
+          delete cleanedTask.skipped;
           
           if (isDiscovery) {
             delete cleanedTask.ease;
             delete cleanedTask.duration;
             delete cleanedTask.autonomy;
             delete cleanedTask.pathFluidity;
-          } else if (isPostTest || isBonus) {
+          } else if (isPostTest) {
             delete cleanedTask.ease;
+            if (postTestAdoptionFromTask10 && !cleanedTask.postTestAdoption) {
+              cleanedTask.postTestAdoption = postTestAdoptionFromTask10;
+              needsUpdate = true;
+            }
           } else {
             delete cleanedTask.valuePropositionClarity;
             delete cleanedTask.firstImpression;
           }
           
           return cleanedTask;
-        })
-      }));
+        });
+        
+        // Restaurer automatiquement la tâche 8 "Trouver l'historique" si elle est manquante
+        const task8Exists = filteredTasks.some(t => t.taskId === 8 || t.title?.toLowerCase().includes('historique'));
+        const participantName = session.participant.name;
+        
+        if (!task8Exists) {
+          console.log(`✅ Restauration automatique tâche 8 pour ${participantName} (sync)`);
+          
+          // Utiliser les données pré-remplies si disponibles, sinon valeurs par défaut modifiables
+          const defaultData = task8Data[participantName] || {
+            ease: undefined,
+            success: false,
+            duration: '',
+            autonomy: '',
+            pathFluidity: ''
+          };
+          
+          const task8: TaskResult = {
+            taskId: 8,
+            title: 'Trouver l\'historique',
+            success: defaultData.success,
+            duration: defaultData.duration,
+            autonomy: defaultData.autonomy,
+            pathFluidity: defaultData.pathFluidity,
+            ease: defaultData.ease,
+            notes: '',
+            taskVerbatimsPositive: '',
+            taskVerbatimsNegative: '',
+            emotionalReaction: 'neutral'
+          };
+          
+          // Insérer la tâche 8 à la bonne position (avant la tâche 9)
+          const task9Index = filteredTasks.findIndex(t => t.taskId === 9 || t.title?.includes('Questions Post-Test'));
+          if (task9Index !== -1) {
+            filteredTasks.splice(task9Index, 0, task8);
+          } else {
+            filteredTasks.push(task8);
+          }
+          
+          needsUpdate = true;
+        }
+        
+        return {
+          ...session,
+          tasks: filteredTasks
+        };
+      });
       
       syncedSessions.forEach((s, idx) => {
         console.log(`Session ${idx + 1}:`, {
@@ -304,6 +610,22 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           nbTasks: s.tasks?.length || 0
         });
       });
+      
+      // Sauvegarder automatiquement si migrations nécessaires
+      if (needsUpdate) {
+        for (const session of migratedSessions) {
+          try {
+            await updateSession(session.id, { tasks: session.tasks });
+          } catch (error) {
+            console.error(`❌ Erreur sauvegarde session ${session.id}:`, error);
+          }
+        }
+        
+        // Mettre à jour aussi le localStorage pour que l'édition fonctionne
+        localStorage.setItem('testSessions', JSON.stringify(migratedSessions));
+        console.log('💾 localStorage synchronisé avec les sessions migrées (sync)');
+      }
+      
       setSessions(migratedSessions);
       toast.success('Synchronisation réussie avec le cloud ☁️');
     } catch (error) {
@@ -338,132 +660,60 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
   };
 
   const handleUploadRecording = (sessionId: number) => {
+    const session = sessions.find(s => s.id === sessionId);
     setSelectedSessionId(sessionId);
-    setUploadFile(null);
-    setTranscriptionText('');
-    setTimestamps([]);
-    setNewTimestamp({ time: '', label: '', description: '' });
+    setVideoUrl(session?.recordingUrl || '');
     setUploadDialogOpen(true);
   };
 
 
 
-  const autoGenerateTimestamps = () => {
-    if (!selectedSessionId) return;
+  // Convertir l'URL Google Drive en URL d'embed si nécessaire
+  const convertGoogleDriveUrl = (url: string): string => {
+    if (!url) return '';
     
-    const session = sessions.find(s => s.id === selectedSessionId);
-    if (!session) return;
-
-    // Générer des timestamps suggérés basés sur les tâches
-    const suggestedTimestamps: VideoTimestamp[] = session.tasks.map((task, index) => ({
-      id: `auto-${Date.now()}-${index}`,
-      time: index * 180, // 3 minutes par tâche (à ajuster manuellement)
-      label: `Tâche ${task.taskId}: ${task.title}`,
-      description: task.success ? 'Tâche réussie' : 'Tâche échouée',
-      taskId: task.taskId
-    }));
-
-    setTimestamps(suggestedTimestamps);
-    toast.success(`${suggestedTimestamps.length} timestamps générés. Ajustez les temps selon votre vidéo.`);
-  };
-
-  const addTimestamp = () => {
-    if (!newTimestamp.time || !newTimestamp.label) {
-      toast.error('Le temps et le label sont requis');
-      return;
-    }
-
-    const timeInSeconds = parseTimeToSeconds(newTimestamp.time);
-    if (isNaN(timeInSeconds) || timeInSeconds < 0) {
-      toast.error('Format de temps invalide. Utilisez MM:SS ou HH:MM:SS');
-      return;
-    }
-
-    const timestamp: VideoTimestamp = {
-      id: Date.now().toString(),
-      time: timeInSeconds,
-      label: newTimestamp.label,
-      description: newTimestamp.description || undefined,
-    };
-
-    setTimestamps([...timestamps, timestamp].sort((a, b) => a.time - b.time));
-    setNewTimestamp({ time: '', label: '', description: '' });
-  };
-
-  const removeTimestamp = (id: string) => {
-    setTimestamps(timestamps.filter(t => t.id !== id));
-  };
-
-  const editTimestamp = (timestamp: VideoTimestamp) => {
-    setNewTimestamp({
-      time: formatTime(timestamp.time),
-      label: timestamp.label,
-      description: timestamp.description || ''
-    });
-    removeTimestamp(timestamp.id);
-  };
-
-  const parseTimeToSeconds = (timeStr: string): number => {
-    const parts = timeStr.split(':').map(p => parseInt(p, 10));
-    if (parts.length === 2) {
-      // MM:SS
-      return parts[0] * 60 + parts[1];
-    } else if (parts.length === 3) {
-      // HH:MM:SS
-      return parts[0] * 3600 + parts[1] * 60 + parts[2];
-    }
-    return NaN;
-  };
-
-  const formatTime = (seconds: number): string => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
+    // Si c'est déjà une URL preview, la retourner telle quelle
+    if (url.includes('/preview')) return url;
     
-    if (hrs > 0) {
-      return `${hrs}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    // Extraire l'ID du fichier Google Drive
+    const match = url.match(/\/file\/d\/([^\/]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/file/d/${match[1]}/preview`;
     }
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
-
-  const seekToTimestamp = (sessionId: number, time: number) => {
-    const player = videoPlayerRefs.current[sessionId];
-    if (player) {
-      player.seekTo(time);
-      player.play();
-    }
-  };
-
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setUploadFile(e.target.files[0]);
-    }
+    
+    // Si c'est une autre URL (YouTube, Vimeo, etc.), la retourner telle quelle
+    return url;
   };
 
   const submitRecording = async () => {
-    if (!selectedSessionId || !uploadFile) {
-      toast.error('Veuillez sélectionner un fichier');
+    if (!selectedSessionId || !videoUrl.trim()) {
+      toast.error('Veuillez saisir une URL de vidéo');
       return;
     }
 
     setIsUploading(true);
     try {
-      const recordingUrl = await uploadRecording(selectedSessionId, uploadFile, transcriptionText, timestamps);
+      const convertedUrl = convertGoogleDriveUrl(videoUrl);
       
       // Update local state
       const updatedSessions = sessions.map(s => 
         s.id === selectedSessionId 
-          ? { ...s, recordingUrl, transcription: transcriptionText, timestamps }
+          ? { ...s, recordingUrl: convertedUrl }
           : s
       );
       setSessions(updatedSessions);
       localStorage.setItem('testSessions', JSON.stringify(updatedSessions));
       
-      toast.success('Enregistrement importé avec succès');
+      // Sync with Supabase
+      await updateSession(selectedSessionId, {
+        recordingUrl: convertedUrl
+      });
+      
+      toast.success('✅ Enregistrement vidéo ajouté avec succès');
       setUploadDialogOpen(false);
     } catch (error) {
-      console.error('Error uploading recording:', error);
-      toast.error('Erreur lors de l\'import de l\'enregistrement');
+      console.error('Error saving recording:', error);
+      toast.error('Erreur lors de la sauvegarde de l\'enregistrement');
     } finally {
       setIsUploading(false);
     }
@@ -1245,15 +1495,14 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       
       console.log(`📊 Métrique "${metric}" - Tâches avec valeur avant filtrage:`, tasksWithMetric.length);
       
-      // La métrique "ease" (Facilité) est collectée UNIQUEMENT pour les tâches d'usage standard
-      // Exclure : Découverte, Questions Post-Test, et tâches bonus
+      // La métrique "ease" (Facilité) est collectée UNIQUEMENT pour les tâches d'usage standard (tâches 2-8)
+      // Exclure : Découverte (tâche 1) et Questions Post-Test (tâche 9)
       if (metric === 'ease') {
         console.log(`   Tâches avant filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
         tasksWithMetric = tasksWithMetric.filter(t => {
           const isPostTest = t.title === 'Questions Post-Test' || t.title?.includes('Questions Post-Test');
           const isDiscovery = t.taskId === 1 || t.title?.includes('Découverte');
-          const isBonus = t.title?.includes('Créer un assistant') || t.title?.includes('BONUS');
-          return !isPostTest && !isDiscovery && !isBonus;
+          return !isPostTest && !isDiscovery;
         });
         console.log(`   Tâches après filtrage:`, tasksWithMetric.map(t => ({ id: t.taskId, title: t.title, ease: t.ease })));
       }
@@ -1457,11 +1706,14 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
     }
 
     // Calcul du score d'adoption moyen (collecté dans la tâche 9 - Questions Post-Test)
-    // Ne prendre en compte que les tâches 10 avec un score d'adoption renseigné (tâche Questions Post-Test)
+    // Chercher dans les tâches dont le titre contient "post-test" (pour plus de robustesse)
     console.log('📊 ===== ANALYSE SCORE D\'ADOPTION =====');
-    console.log('📊 Toutes les tâches:', allTasks.map(t => ({ sessionId: sessions.find((s: any) => s.tasks?.some((st: any) => st === t))?.id, taskId: t.taskId, adoption: t.postTestAdoption })));
-    const tasksWithAdoption = allTasks.filter(t => t.taskId === 10 && t.postTestAdoption !== undefined && t.postTestAdoption !== null);
-    console.log('📊 Score d\'adoption - Tâches 10 (Questions Post-Test) avec postTestAdoption:', tasksWithAdoption.map(t => ({ id: t.taskId, adoption: t.postTestAdoption })));
+    console.log('📊 Toutes les tâches:', allTasks.map(t => ({ sessionId: sessions.find((s: any) => s.tasks?.some((st: any) => st === t))?.id, taskId: t.taskId, title: t.title, adoption: t.postTestAdoption })));
+    const tasksWithAdoption = allTasks.filter(t => {
+      const isPostTest = t.taskId === 9 || t.title?.toLowerCase().includes('post-test') || t.title?.toLowerCase().includes('questions post-test');
+      return isPostTest && t.postTestAdoption !== undefined && t.postTestAdoption !== null;
+    });
+    console.log('📊 Score d\'adoption - Tâches post-test avec postTestAdoption:', tasksWithAdoption.map(t => ({ id: t.taskId, title: t.title, adoption: t.postTestAdoption })));
     const adoptionScore = tasksWithAdoption.length > 0
       ? tasksWithAdoption.reduce((sum, t) => sum + (t.postTestAdoption || 0), 0) / tasksWithAdoption.length
       : null;
@@ -1621,866 +1873,318 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
       {stats && (
         <>
           {/* ============================================ */}
+          {/* FLOATING NAVIGATION BAR */}
+          {/* ============================================ */}
+          <div 
+            className={`fixed bottom-6 z-50 max-w-[95vw] transition-all duration-200 ease-in-out ${
+              showNavBar 
+                ? 'translate-y-0 opacity-100' 
+                : 'translate-y-20 opacity-0 pointer-events-none'
+            }`}
+            style={{
+              left: '50%',
+              marginLeft: sidebarCollapsed ? '32px' : '128px',
+              transform: 'translateX(-50%)'
+            }}
+          >
+            <div className="bg-white/95 backdrop-blur-md shadow-2xl border border-[var(--border)] rounded-full px-3 py-2 flex items-center gap-2 overflow-x-auto scrollbar-hide">
+              <button
+                onClick={() => scrollToSection('overview')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
+                  activeSection === 'overview'
+                    ? 'bg-[var(--accent)] text-[var(--accent-foreground)] shadow-md scale-105'
+                    : 'bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--muted)]/70 hover:text-[var(--foreground)]'
+                }`}
+                title="Vue d'ensemble"
+              >
+                <Activity className="w-5 h-5" />
+                <span className="hidden md:inline">Vue d'ensemble</span>
+              </button>
+              
+              <button
+                onClick={() => scrollToSection('behavioral')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
+                  activeSection === 'behavioral'
+                    ? 'bg-[var(--accent)] text-[var(--accent-foreground)] shadow-md scale-105'
+                    : 'bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--muted)]/70 hover:text-[var(--foreground)]'
+                }`}
+                title="Synthèse comportementale"
+              >
+                <BarChart3 className="w-5 h-5" />
+                <span className="hidden md:inline">Comportemental</span>
+              </button>
+              
+              <button
+                onClick={() => scrollToSection('qualitative')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
+                  activeSection === 'qualitative'
+                    ? 'bg-[var(--accent)] text-[var(--accent-foreground)] shadow-md scale-105'
+                    : 'bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--muted)]/70 hover:text-[var(--foreground)]'
+                }`}
+                title="Synthèse qualitative"
+              >
+                <Lightbulb className="w-5 h-5" />
+                <span className="hidden md:inline">Qualitatif</span>
+              </button>
+              
+              <button
+                onClick={() => scrollToSection('tasks')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
+                  activeSection === 'tasks'
+                    ? 'bg-[var(--accent)] text-[var(--accent-foreground)] shadow-md scale-105'
+                    : 'bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--muted)]/70 hover:text-[var(--foreground)]'
+                }`}
+                title="Performance par tâche"
+              >
+                <Target className="w-5 h-5" />
+                <span className="hidden md:inline">Tâches</span>
+              </button>
+              
+              <button
+                onClick={() => scrollToSection('sessions')}
+                className={`flex items-center gap-2 px-3 py-2 rounded-full whitespace-nowrap transition-all duration-200 ${
+                  activeSection === 'sessions'
+                    ? 'bg-[var(--accent)] text-[var(--accent-foreground)] shadow-md scale-105'
+                    : 'bg-transparent text-[var(--muted-foreground)] hover:bg-[var(--muted)]/70 hover:text-[var(--foreground)]'
+                }`}
+                title="Sessions détaillées"
+              >
+                <Users className="w-5 h-5" />
+                <span className="hidden md:inline">Sessions</span>
+              </button>
+            </div>
+          </div>
+
+          {/* ============================================ */}
           {/* SECTION 1: VUE D'ENSEMBLE */}
           {/* ============================================ */}
-          <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
+          <div id="section-overview" className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
             <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
-              <div className="flex items-center gap-4">
-                <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
-                  <Activity className="w-6 h-6 text-[var(--accent-foreground)]" />
+              <div className="flex items-center justify-between gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
+                    <Activity className="w-6 h-6 text-[var(--accent-foreground)]" />
+                  </div>
+                  <div>
+                    <h2 className="text-[var(--accent-foreground)]">Vue d'ensemble</h2>
+                    <p className="text-[var(--accent-foreground)]/70">Indicateurs clés de performance</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-[var(--accent-foreground)]">Vue d'ensemble</h2>
-                  <p className="text-[var(--accent-foreground)]/70">Indicateurs clés de performance</p>
+                
+                {/* Métriques rapides dans le header */}
+                <div className="hidden lg:flex items-center gap-6">
+                  <div className="flex flex-col items-end">
+                    <p className="text-xs text-[var(--accent-foreground)]/70">Participants</p>
+                    <p className="text-lg text-[var(--accent-foreground)]">
+                      {(() => {
+                        const uniqueParticipants = new Set(sessions.map(s => s.participant.name));
+                        return uniqueParticipants.size;
+                      })()}
+                    </p>
+                  </div>
+                  
+                  <div className="w-px h-10 bg-[var(--accent-foreground)]/20" />
+                  
+                  <div className="flex flex-col items-end">
+                    <p className="text-xs text-[var(--accent-foreground)]/70">Sessions</p>
+                    <p className="text-lg text-[var(--accent-foreground)]">{sessions.length}</p>
+                  </div>
+                  
+                  <div className="w-px h-10 bg-[var(--accent-foreground)]/20" />
+                  
+                  <div className="flex flex-col items-end">
+                    <p className="text-xs text-[var(--accent-foreground)]/70">Dernier test</p>
+                    <p className="text-sm text-[var(--accent-foreground)]">
+                      {(() => {
+                        const latestSession = sessions.sort((a, b) => 
+                          new Date(b.date).getTime() - new Date(a.date).getTime()
+                        )[0];
+                        
+                        const today = new Date();
+                        const sessionDate = new Date(latestSession.date);
+                        
+                        const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                        const sessionMidnight = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
+                        
+                        const daysDiff = Math.floor(
+                          (todayMidnight.getTime() - sessionMidnight.getTime()) / (1000 * 60 * 60 * 24)
+                        );
+                        
+                        if (daysDiff === 0) return "Aujourd'hui";
+                        if (daysDiff === 1) return "Hier";
+                        if (daysDiff < 7) return `Il y a ${daysDiff}j`;
+                        if (daysDiff < 30) return `Il y a ${Math.floor(daysDiff / 7)}sem`;
+                        return `Il y a ${Math.floor(daysDiff / 30)}mois`;
+                      })()}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
 
             <div className="p-6 space-y-6">
-              {/* Métriques Contextuelles */}
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 py-[16px] p-[0px] mt-[0px] mr-[0px] mb-[24px] ml-[0px]">
-                {/* Participants */}
-                <div className="flex flex-col flex-1">
-                  <p className="text-xs text-[var(--muted-foreground)] mb-1">Participants</p>
-                  <p className="text-2xl text-[var(--foreground)] text-[18px]">
-                    {(() => {
-                      const uniqueParticipants = new Set(sessions.map(s => s.participant.name));
-                      return uniqueParticipants.size;
-                    })()}
-                  </p>
-                </div>
-
-                <div className="hidden md:block w-px h-12 bg-[var(--border)] opacity-50" />
-
-                {/* Sessions */}
-                <div className="flex flex-col flex-1">
-                  <p className="text-xs text-[var(--muted-foreground)] mb-1">Sessions</p>
-                  <p className="text-2xl text-[var(--foreground)] text-[18px]">{sessions.length}</p>
-                </div>
-
-                <div className="hidden md:block w-px h-12 bg-[var(--border)] opacity-50" />
-
-                {/* Rôles testés */}
-                
-
-              
-
-                {/* Dernier test */}
-                <div className="flex flex-col flex-1">
-                  <p className="text-xs text-[var(--muted-foreground)] mb-1">Dernier test</p>
-                  <p className="text-sm text-[var(--foreground)] text-[18px]">
-                    {(() => {
-                      const latestSession = sessions.sort((a, b) => 
-                        new Date(b.date).getTime() - new Date(a.date).getTime()
-                      )[0];
-                      
-                      // Comparer les dates calendaires, pas les heures écoulées
-                      const today = new Date();
-                      const sessionDate = new Date(latestSession.date);
-                      
-                      // Remettre à minuit pour comparer uniquement les jours
-                      const todayMidnight = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-                      const sessionMidnight = new Date(sessionDate.getFullYear(), sessionDate.getMonth(), sessionDate.getDate());
-                      
-                      const daysDiff = Math.floor(
-                        (todayMidnight.getTime() - sessionMidnight.getTime()) / (1000 * 60 * 60 * 24)
-                      );
-                      
-                      if (daysDiff === 0) return 'Aujourd\'hui';
-                      if (daysDiff === 1) return 'Hier';
-                      if (daysDiff < 7) return `Il y a ${daysDiff}j`;
-                      if (daysDiff < 30) return `Il y a ${Math.floor(daysDiff / 7)}sem`;
-                      return `Il y a ${Math.floor(daysDiff / 30)}mois`;
-                    })()}
-                  </p>
-                </div>
-              </div>
-
-
-              {/* KPIs principaux */}
-              <div className="grid md:grid-cols-4 gap-4">
-                <Card className="bg-white border-[var(--border)]">
-                  <CardContent className="pt-6 pb-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-[#010502]" />
-                        <span className="text-sm text-[#010502] font-bold text-[16px] font-normal">Taux de réussite</span>
+              {/* KPI Cards - Super important ! */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                {/* KPI 1: Taux de réussite */}
+                <Card className="overflow-hidden border-[var(--border)] hover:shadow-md transition-shadow">
+                  <CardContent className="p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                      <div className="p-2 bg-[var(--muted)] rounded-[var(--radius-lg)]">
+                        <CheckCircle2 className="w-4 h-4 text-[var(--primary)]" />
                       </div>
+                      <h4 className="text-sm text-[var(--primary)]">Taux de réussite</h4>
                     </div>
-                    <div className="text-3xl mb-2 text-[var(--success)]">{stats.successRate.toFixed(0)}%</div>
-                    <Progress value={stats.successRate} variant="success" className="h-1.5" />
+                    <div className="space-y-2">
+                      <p className="text-3xl text-[var(--foreground)]">
+                        <AnimatedNumber value={stats.successRate} duration={1500} decimals={0} suffix="%" delay={0} />
+                      </p>
+                      <AnimatedProgress value={stats.successRate} className="h-2" duration={1500} delay={0} />
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {(() => {
+                          const totalTasks = sessions.reduce((sum, s) => sum + s.tasks.filter(t => t.taskId !== 1 && t.taskId !== 9).length, 0);
+                          const successfulTasks = Math.round((stats.successRate / 100) * totalTasks);
+                          return `${successfulTasks}/${totalTasks} tâches réussies`;
+                        })()}
+                      </p>
+                    </div>
                   </CardContent>
                 </Card>
 
-                <Card className="bg-white border-[var(--border)]">
-                  <CardContent className="pt-6 pb-4">
-                    {stats.autonomyRate !== null ? (
-                      <>
-                        <div className="flex items-center justify-between mb-3 bg-[rgba(1,5,2,0)]">
-                          <div className="flex items-center gap-2">
-                            <Zap className="w-4 h-4 text-[#010502]" />
-                            <span className="text-sm text-[16px] font-bold font-normal text-[#010502]">Autonomie complète</span>
-                          </div>
+                {/* KPI 2: Autonomie */}
+                {stats.autonomyRate !== null && (
+                  <Card className="overflow-hidden border-[var(--border)] hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-[var(--muted)] rounded-[var(--radius-lg)]">
+                          <Zap className="w-4 h-4 text-[var(--primary)]" />
                         </div>
-                        <div className={`text-3xl mb-2 ${stats.autonomyRate >= 70 ? 'text-[var(--success)]' : 'text-[var(--warning)]'}`}>
-                          {stats.autonomyRate.toFixed(0)}%
-                        </div>
-                        <Progress value={stats.autonomyRate} variant={stats.autonomyRate >= 70 ? "success" : "warning"} className="h-1.5" />
-                        <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                          Tâches réussies sans aide
+                        <h4 className="text-sm text-[var(--primary)]">Autonomie</h4>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-3xl text-[var(--foreground)]">
+                          <AnimatedNumber value={stats.autonomyRate} duration={1500} decimals={0} suffix="%" delay={150} />
                         </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 mb-3">
-                          <Zap className="w-4 h-4 text-[var(--muted-foreground)]" />
-                          <span className="text-sm text-[var(--muted-foreground)]">Autonomie complète</span>
-                        </div>
-                        <div className="text-3xl text-[var(--muted-foreground)] mb-2">N/A</div>
+                        <AnimatedProgress 
+                          value={stats.autonomyRate} 
+                          className="h-2"
+                          duration={1500}
+                          delay={150}
+                        />
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Aucune donnée d'autonomie
+                          Sans ou avec peu d'aide
                         </p>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* Facilité */}
-                <Card className="bg-white border-[var(--border)]">
-                  <CardContent className="pt-6 pb-4">
-                    {stats.numericalMetrics.ease !== undefined ? (
-                      <>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <Smile className="w-4 h-4 text-[#010502]" />
-                            <span className="text-sm text-[#010502] text-[16px]">Facilité</span>
-                          </div>
+                {/* KPI 3: Facilité */}
+                {stats.numericalMetrics.ease !== undefined && (
+                  <Card className="overflow-hidden border-[var(--border)] hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-[var(--muted)] rounded-[var(--radius-lg)]">
+                          <ThumbsUp className="w-4 h-4 text-[var(--primary)]" />
                         </div>
-                        <div className="text-3xl mb-2">
-                          <span className={`${
-                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 8 ? 'text-[var(--success)]' : 
-                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 6 ? 'text-[var(--warning)]' : 
-                            'text-[var(--destructive)]'
-                          }`}>
-                            {(stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count).toFixed(1)}
-                          </span>
+                        <h4 className="text-sm text-[var(--primary)]">Facilité</h4>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-3xl text-[var(--foreground)]">
+                          <AnimatedNumber 
+                            value={stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count} 
+                            duration={1500} 
+                            decimals={1}
+                            delay={300}
+                          />
                           <span className="text-lg text-[var(--muted-foreground)]">/10</span>
-                        </div>
-                        <Progress 
+                        </p>
+                        <AnimatedProgress 
                           value={(stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) * 10} 
-                          variant={
-                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 8 ? "success" : 
-                            (stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count) >= 6 ? "warning" : 
-                            "destructive"
-                          } 
-                          className="h-1.5" 
+                          className="h-2"
+                          duration={1500}
+                          delay={300}
                         />
-                        <p className="text-xs text-[var(--muted-foreground)] mt-2">
-                          Perception de facilité d'usage
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 mb-3">
-                          <Smile className="w-4 h-4 text-[var(--muted-foreground)]" />
-                          <span className="text-sm text-[var(--muted-foreground)]">Facilité</span>
-                        </div>
-                        <div className="text-3xl text-[var(--muted-foreground)] mb-2">N/A</div>
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Aucune donnée de facilité
+                          Score moyen de facilité
                         </p>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* Score d'Adoption - NOUVEAU */}
-                <Card className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200">
-                  <CardContent className="pt-6 pb-4">
-                    {stats.adoptionScore !== null && stats.adoptionScore !== undefined ? (
-                      <>
-                        <div className="flex items-center justify-between mb-3">
-                          <div className="flex items-center gap-2">
-                            <ThumbsUp className="w-4 h-4 text-purple-600" />
-                            <span className="text-sm text-purple-900 font-bold text-[16px] font-normal">Score d'adoption</span>
-                          </div>
+                {/* KPI 4: Score d'adoption */}
+                {stats.adoptionScore !== null && (
+                  <Card className="overflow-hidden border-[var(--border)] hover:shadow-md transition-shadow">
+                    <CardContent className="p-5">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-[var(--muted)] rounded-[var(--radius-lg)]">
+                          <Target className="w-4 h-4 text-[var(--primary)]" />
                         </div>
-                        <div className="text-3xl mb-2">
-                          <span className={`${
-                            stats.adoptionScore >= 8 ? 'text-[var(--success)]' : 
-                            stats.adoptionScore >= 6 ? 'text-purple-600' : 
-                            stats.adoptionScore >= 4 ? 'text-[var(--warning)]' :
-                            'text-[var(--destructive)]'
-                          }`}>
-                            {stats.adoptionScore.toFixed(1)}
-                          </span>
+                        <h4 className="text-sm text-[var(--primary)]">Score d'adoption</h4>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-3xl text-[var(--foreground)]">
+                          <AnimatedNumber value={stats.adoptionScore} duration={1500} decimals={1} delay={450} />
                           <span className="text-lg text-[var(--muted-foreground)]">/10</span>
-                        </div>
-                        <Progress 
+                        </p>
+                        <AnimatedProgress 
                           value={stats.adoptionScore * 10} 
-                          variant={
-                            stats.adoptionScore >= 8 ? "success" : 
-                            stats.adoptionScore >= 6 ? "default" : 
-                            stats.adoptionScore >= 4 ? "warning" :
-                            "destructive"
-                          } 
-                          className="h-1.5" 
+                          className="h-2"
+                          duration={1500}
+                          delay={450}
                         />
-                        <p className="text-xs text-purple-700 mt-2">
-                          Usage quotidien envisagé
-                        </p>
-                      </>
-                    ) : (
-                      <>
-                        <div className="flex items-center gap-2 mb-3">
-                          <ThumbsUp className="w-4 h-4 text-[var(--muted-foreground)]" />
-                          <span className="text-sm text-[var(--muted-foreground)]">Score d'adoption</span>
-                        </div>
-                        <div className="text-3xl text-[var(--muted-foreground)] mb-2">N/A</div>
                         <p className="text-xs text-[var(--muted-foreground)]">
-                          Aucune donnée d'adoption
+                          Usage quotidien perçu
                         </p>
-                      </>
-                    )}
-                  </CardContent>
-                </Card>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
 
-              {/* Insights automatiques */}
-              {(stats.insights.strengths.length > 0 || stats.insights.improvements.length > 0) && (
-                <div className="grid md:grid-cols-2 gap-4">
-                  {stats.insights.strengths.length > 0 && (
-                    <Card className="bg-white border-[var(--success)]">
-                      <CardContent className="pt-5 pb-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <CheckCircle2 className="w-4 h-4 text-[var(--success)]" />
-                          <span className="text-[var(--success)]">Points forts</span>
-                        </div>
-                        <ul className="space-y-1.5">
-                          {stats.insights.strengths.map((strength, idx) => (
-                            <li key={idx} className="flex items-start gap-2 text-[var(--foreground)]">
-                              <span className="text-[var(--success)] mt-0.5">•</span>
-                              <span>{strength}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </CardContent>
-                    </Card>
-                  )}
-
-                  {stats.insights.improvements.length > 0 && (
-                    <Card className="bg-white border-[var(--warning)]">
-                      <CardContent className="pt-5 pb-4">
-                        <div className="flex items-center gap-2 mb-3">
-                          <AlertCircle className="w-4 h-4 text-[var(--warning)]" />
-                          <span className="text-[var(--warning)]">Points d'amélioration</span>
-                        </div>
-                        <ul className="space-y-1.5">
-                          {stats.insights.improvements.map((improvement, idx) => (
-                            <li key={idx} className="flex items-start gap-2 text-[var(--foreground)]">
-                              <span className="text-[var(--warning)] mt-0.5">•</span>
-                              <span>{improvement}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </CardContent>
-                    </Card>
-                  )}
-                </div>
-              )}
+              {/* Insights simplifiés */}
+              <SimplifiedOverviewInsights 
+                taskStats={stats.taskStats} 
+                insights={stats.insights} 
+              />
             </div>
           </div>
 
           {/* ============================================ */}
           {/* SECTION 2: SYNTHÈSE COMPORTEMENTALE */}
           {/* ============================================ */}
-          {Object.keys(stats.categoricalStats).length > 0 && (
-            <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
+          {stats.taskStats.length > 0 && (
+            <div id="section-behavioral" className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
               <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
                 <div className="flex items-center gap-4">
-                  <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
-                    <Activity className="w-6 h-6 text-[var(--accent-foreground)]" />
+                  <div className="p-3 rounded-[var(--radius-xl)] bg-[var(--accent-foreground)]/10 backdrop-blur-sm">
+                    <TrendingUp className="w-6 h-6 text-[var(--accent-foreground)]" />
                   </div>
                   <div>
-                    <h2 className="text-[var(--accent-foreground)]">Synthèse Comportementale</h2>
+                    <h2 className="text-[var(--accent-foreground)]">Synthèse comportementale</h2>
                     <p className="text-[var(--accent-foreground)]/70">Analyse des patterns d'utilisation et recommandations</p>
                   </div>
                 </div>
               </div>
 
               <div className="p-6 space-y-6">
-                {/* Insights globaux */}
-                {(() => {
-                  const insights: { type: 'success' | 'warning' | 'alert'; icon: any; title: string; message: string; recommendation?: string }[] = [];
-                  
-                  // Analyse Autonomie
-                  if (stats.categoricalStats.autonomy) {
-                    const total = Object.values(stats.categoricalStats.autonomy).reduce((sum, c) => sum + c, 0);
-                    const autonomous = stats.categoricalStats.autonomy['autonomous'] || 0;
-                    const minimalHelp = stats.categoricalStats.autonomy['minimal-help'] || 0;
-                    const guided = stats.categoricalStats.autonomy['guided'] || 0;
-                    const blocked = stats.categoricalStats.autonomy['blocked'] || 0;
-                    const aloneRate = ((autonomous + minimalHelp) / total) * 100;
-                    
-                    if (aloneRate >= 70) {
-                      insights.push({
-                        type: 'success',
-                        icon: Zap,
-                        title: 'Excellente autonomie',
-                        message: `${aloneRate.toFixed(0)}% des tâches réussies sans ou avec peu d'aide (${autonomous + minimalHelp}/${total})`,
-                        recommendation: 'Les utilisateurs naviguent intuitivement. Maintenez cette clarté dans les futures fonctionnalités.'
-                      });
-                    } else if (aloneRate < 50) {
-                      insights.push({
-                        type: 'alert',
-                        icon: AlertTriangle,
-                        title: 'Aide fréquemment nécessaire',
-                        message: `Seulement ${aloneRate.toFixed(0)}% d'autonomie (${guided} guidés, ${blocked} bloqués)`,
-                        recommendation: 'URGENT : Ajouter des tooltips contextuels, simplifier les parcours et renforcer l\'onboarding.'
-                      });
-                    } else {
-                      insights.push({
-                        type: 'warning',
-                        icon: Zap,
-                        title: 'Autonomie moyenne',
-                        message: `${aloneRate.toFixed(0)}% d'autonomie - ${guided + blocked} utilisateurs ont eu besoin d'aide`,
-                        recommendation: 'Ajoutez des messages d\'aide inline et des exemples concrets pour guider les utilisateurs.'
-                      });
-                    }
-                  }
-                  
-                  // Analyse Réaction Émotionnelle
-                  if (stats.categoricalStats.emotionalReaction) {
-                    const total = Object.values(stats.categoricalStats.emotionalReaction).reduce((sum, c) => sum + c, 0);
-                    const positive = stats.categoricalStats.emotionalReaction['positive'] || 0;
-                    const neutral = stats.categoricalStats.emotionalReaction['neutral'] || 0;
-                    const frustrated = stats.categoricalStats.emotionalReaction['frustrated'] || 0;
-                    const positiveRate = (positive / total) * 100;
-                    const frustratedRate = (frustrated / total) * 100;
-                    
-                    if (frustratedRate >= 30) {
-                      insights.push({
-                        type: 'alert',
-                        icon: AlertTriangle,
-                        title: 'Frustration élevée détectée',
-                        message: `${frustratedRate.toFixed(0)}% de réactions négatives (${frustrated} participants)`,
-                        recommendation: 'CRITIQUE : Identifier les points de friction principaux et simplifier les parcours concernés.'
-                      });
-                    } else if (positiveRate >= 60) {
-                      insights.push({
-                        type: 'success',
-                        icon: Smile,
-                        title: 'Expérience émotionnelle positive',
-                        message: `${positiveRate.toFixed(0)}% de réactions positives/confiantes`,
-                        recommendation: 'Bon ressenti général. Documentez les éléments appréciés pour les reproduire.'
-                      });
-                    } else if (frustratedRate > 0) {
-                      insights.push({
-                        type: 'warning',
-                        icon: Smile,
-                        title: 'Quelques frustrations observées',
-                        message: `${frustrated} participant${frustrated > 1 ? 's' : ''} frustré${frustrated > 1 ? 's' : ''} / ${neutral} neutre${neutral > 1 ? 's' : ''}`,
-                        recommendation: 'Analysez les notes qualitatives pour identifier les sources de friction.'
-                      });
-                    }
-                  }
-                  
-                  // Analyse Fluidité
-                  if (stats.categoricalStats.pathFluidity) {
-                    const total = Object.values(stats.categoricalStats.pathFluidity).reduce((sum, c) => sum + c, 0);
-                    const direct = stats.categoricalStats.pathFluidity['direct'] || 0;
-                    const hesitant = stats.categoricalStats.pathFluidity['hesitant'] || 0;
-                    const erratic = stats.categoricalStats.pathFluidity['erratic'] || 0;
-                    const directRate = (direct / total) * 100;
-                    const erraticRate = (erratic / total) * 100;
-                    
-                    if (erraticRate >= 25) {
-                      insights.push({
-                        type: 'alert',
-                        icon: Navigation,
-                        title: 'Parcours erratiques fréquents',
-                        message: `${erraticRate.toFixed(0)}% de parcours erratiques (${erratic}/${total})`,
-                        recommendation: 'URGENT : L\'architecture de l\'information est confuse. Repenser la navigation et l\'organisation.'
-                      });
-                    } else if (directRate >= 60) {
-                      insights.push({
-                        type: 'success',
-                        icon: Navigation,
-                        title: 'Navigation fluide',
-                        message: `${directRate.toFixed(0)}% de parcours directs - architecture claire`,
-                        recommendation: 'Les utilisateurs trouvent rapidement leur chemin. Structure efficace à conserver.'
-                      });
-                    } else if (hesitant > 0) {
-                      insights.push({
-                        type: 'warning',
-                        icon: Navigation,
-                        title: 'Hésitations dans la navigation',
-                        message: `${hesitant} participant${hesitant > 1 ? 's' : ''} hésitant${hesitant > 1 ? 's' : ''} dans leur parcours`,
-                        recommendation: 'Clarifiez les labels de navigation et renforcez la hiérarchie visuelle.'
-                      });
-                    }
-                  }
-                  
-                  // Analyse Durée
-                  if (stats.categoricalStats.duration) {
-                    const total = Object.values(stats.categoricalStats.duration).reduce((sum, c) => sum + c, 0);
-                    const fast = (stats.categoricalStats.duration['very-fast'] || 0) + (stats.categoricalStats.duration['fast'] || 0);
-                    const slow = (stats.categoricalStats.duration['long'] || 0) + (stats.categoricalStats.duration['very-long'] || 0);
-                    const slowRate = (slow / total) * 100;
-                    
-                    if (slowRate >= 40) {
-                      insights.push({
-                        type: 'warning',
-                        icon: Clock,
-                        title: 'Temps d\'exécution élevés',
-                        message: `${slowRate.toFixed(0)}% des tâches prennent trop de temps (${slow}/${total})`,
-                        recommendation: 'Optimisez les parcours longs : réduire les étapes, ajouter des raccourcis, pré-remplir les champs.'
-                      });
-                    } else if ((fast / total) * 100 >= 60) {
-                      insights.push({
-                        type: 'success',
-                        icon: Clock,
-                        title: 'Efficacité temporelle',
-                        message: `${((fast / total) * 100).toFixed(0)}% des tâches réalisées rapidement`,
-                        recommendation: 'Parcours optimisés. Mesurez les temps réels pour confirmer cette perception.'
-                      });
-                    }
-                  }
-                  
-                  // Analyse Méthodes de recherche
-                  if (stats.categoricalStats.searchMethod) {
-                    const total = Object.values(stats.categoricalStats.searchMethod).reduce((sum, c) => sum + c, 0);
-                    const searchBar = stats.categoricalStats.searchMethod['search-bar'] || 0;
-                    const visualCatalog = stats.categoricalStats.searchMethod['visual-catalog'] || 0;
-                    const sidebarAssistants = stats.categoricalStats.searchMethod['sidebar-assistants'] || 0;
-                    const confused = stats.categoricalStats.searchMethod['confused'] || 0;
-                    const confusedRate = (confused / total) * 100;
-                    
-                    if (confusedRate >= 30) {
-                      insights.push({
-                        type: 'alert',
-                        icon: Search,
-                        title: 'Difficulté à trouver les assistants',
-                        message: `${confusedRate.toFixed(0)}% des utilisateurs ne trouvent pas ou sont confus (${confused}/${total})`,
-                        recommendation: 'URGENT : Améliorer la visibilité et l\'accès aux assistants. Considérer un onboarding guidé.'
-                      });
-                    } else if (sidebarAssistants > searchBar && sidebarAssistants > visualCatalog) {
-                      insights.push({
-                        type: 'success',
-                        icon: Search,
-                        title: 'Barre latérale plébiscitée',
-                        message: `${((sidebarAssistants / total) * 100).toFixed(0)}% préfèrent la barre latérale (${sidebarAssistants}/${total})`,
-                        recommendation: 'La barre latérale est efficace. Envisagez de la mettre davantage en avant.'
-                      });
-                    } else if (searchBar > 0 && visualCatalog > 0) {
-                      const mostUsed = searchBar > visualCatalog ? 'Barre de recherche' : 'Navigation visuelle';
-                      const mostUsedCount = Math.max(searchBar, visualCatalog);
-                      insights.push({
-                        type: 'success',
-                        icon: Search,
-                        title: `${mostUsed} privilégiée`,
-                        message: `${((mostUsedCount / total) * 100).toFixed(0)}% utilisent ${mostUsed.toLowerCase()} (${mostUsedCount}/${total})`,
-                        recommendation: 'Méthodes de recherche équilibrées. Maintenez cette diversité d\'accès.'
-                      });
-                    }
-                  }
-                  
-                  return (
-                    <div className="space-y-3">
-                      {insights.map((insight, idx) => (
-                        <Card 
-                          key={idx} 
-                          className={`border-l-4 ${
-                            insight.type === 'success' ? 'border-l-[var(--success)] bg-green-50/50' :
-                            insight.type === 'alert' ? 'border-l-[var(--destructive)] bg-red-50/50' :
-                            'border-l-[var(--warning)] bg-yellow-50/50'
-                          }`}
-                        >
-                          <CardContent className="pt-4 pb-4">
-                            <div className="flex gap-3">
-                              <div className={`p-2 rounded-[var(--radius)] h-fit ${
-                                insight.type === 'success' ? 'bg-[var(--success)]/10' :
-                                insight.type === 'alert' ? 'bg-[var(--destructive)]/10' :
-                                'bg-[var(--warning)]/10'
-                              }`}>
-                                <insight.icon className={`w-5 h-5 ${
-                                  insight.type === 'success' ? 'text-[var(--success)]' :
-                                  insight.type === 'alert' ? 'text-[var(--destructive)]' :
-                                  'text-[var(--warning)]'
-                                }`} />
-                              </div>
-                              <div className="flex-1 space-y-1">
-                                <div className="flex items-start justify-between gap-2">
-                                  <h4 className="text-[var(--foreground)]">{insight.title}</h4>
-                                  <Badge 
-                                    variant={insight.type === 'success' ? 'default' : 'destructive'}
-                                    className={
-                                      insight.type === 'success' ? 'bg-[var(--success)] hover:bg-[var(--success)]' :
-                                      insight.type === 'alert' ? 'bg-[var(--destructive)] hover:bg-[var(--destructive)]' :
-                                      'bg-[var(--warning)] hover:bg-[var(--warning)]'
-                                    }
-                                  >
-                                    {insight.type === 'success' ? '✓ Bon' : insight.type === 'alert' ? '⚠ Urgent' : '⚡ À surveiller'}
-                                  </Badge>
-                                </div>
-                                <p className="text-sm text-[var(--muted-foreground)]">{insight.message}</p>
-                                {insight.recommendation && (
-                                  <p className="text-sm text-[var(--foreground)] bg-white/80 p-2 rounded-[var(--radius)] border border-[var(--border)] mt-2">
-                                    <strong>→ Action :</strong> {insight.recommendation}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  );
-                })()}
-
-                {/* Card Méthodes de recherche */}
-                {stats.categoricalStats.searchMethod && (() => {
-                  const total = Object.values(stats.categoricalStats.searchMethod).reduce((sum, c) => sum + c, 0);
-                  const COLORS: Record<string, string> = {
-                    'search-bar': 'var(--accent)',
-                    'visual-catalog': '#9C27B0',
-                    'sidebar-assistants': '#2196F3',
-                    'confused': 'var(--destructive)'
-                  };
-                  const data = Object.entries(stats.categoricalStats.searchMethod)
-                    .map(([key, count]) => ({
-                      key,
-                      name: searchMethodLabels[key] || key,
-                      value: count,
-                      percentage: ((count / total) * 100).toFixed(0),
-                      fill: COLORS[key] || 'var(--accent)'
-                    }))
-                    .sort((a, b) => b.value - a.value);
-
-                  return (
-                    <Card className="shadow-md border-[var(--border)] overflow-hidden">
-                      <CardContent className="p-6">
-                        <div className="flex items-center gap-2 mb-4">
-                          <div className="p-2 bg-[var(--accent)]/10 rounded-[var(--radius)]">
-                            <Search className="w-5 h-5 text-[var(--accent)]" />
-                          </div>
-                          <h3 className="text-[var(--foreground)]">Méthodes de recherche utilisées</h3>
-                        </div>
-                        
-                        <div className="space-y-3">
-                          {data.map((method) => (
-                            <div key={method.key} className="space-y-1.5">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-[var(--foreground)]">{method.name}</span>
-                                <span className="text-[var(--muted-foreground)]">
-                                  {method.value} fois ({method.percentage}%)
-                                </span>
-                              </div>
-                              <div className="relative h-2 bg-[var(--muted)] rounded-full overflow-hidden">
-                                <div 
-                                  className="absolute top-0 left-0 h-full rounded-full transition-all"
-                                  style={{ 
-                                    width: `${method.percentage}%`,
-                                    backgroundColor: method.fill
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* Insight rapide */}
-                        <div className="mt-4 p-3 bg-[var(--muted)]/30 rounded-[var(--radius)] border border-[var(--border)]">
-                          <p className="text-sm text-[var(--muted-foreground)]">
-                            {(() => {
-                              const mostUsed = data[0];
-                              const confused = stats.categoricalStats.searchMethod['confused'] || 0;
-                              const confusedRate = (confused / total) * 100;
-                              
-                              if (confusedRate >= 30) {
-                                return `⚠️ ${confusedRate.toFixed(0)}% des utilisateurs ont eu des difficultés à trouver les assistants.`;
-                              } else if (mostUsed) {
-                                return `✓ La méthode la plus utilisée est "${mostUsed.name}" avec ${mostUsed.percentage}% des utilisations.`;
-                              }
-                              return 'Distribution équilibrée des méthodes de recherche.';
-                            })()}
-                          </p>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })()}
-
-                {/* Détails graphiques (optionnel - collapse) */}
-                <Collapsible>
-                  <CollapsibleTrigger className="flex items-center gap-2 text-sm text-[var(--accent)] hover:underline">
-                    <ChevronDown className="w-4 h-4" />
-                    Voir les graphiques détaillés
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-4">
-                    <div className="grid md:grid-cols-2 gap-6">
-                      {/* Autonomie */}
-                      {stats.categoricalStats.autonomy && (() => {
-                        const COLORS = {
-                          'alone': 'var(--success)',
-                          'hints': 'var(--warning)',
-                          'with-help': '#FF9800',
-                          'failed': 'var(--destructive)'
-                        };
-                        const data = Object.entries(stats.categoricalStats.autonomy).map(([key, count]) => {
-                          const total = Object.values(stats.categoricalStats.autonomy).reduce((sum, c) => sum + c, 0);
-                          return {
-                            name: autonomyLabels[key] || key,
-                            value: count,
-                            percentage: ((count / total) * 100).toFixed(0),
-                            fill: COLORS[key as keyof typeof COLORS] || 'var(--accent)'
-                          };
-                        }).sort((a, b) => b.value - a.value);
-                        
-                        return (
-                          <Card className="shadow-md border-[var(--border)]">
-                            <CardContent className="pt-6 space-y-4">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Zap className="w-5 h-5 text-[var(--accent)]" />
-                                <h3 className="text-[var(--foreground)]">Niveau d'autonomie</h3>
-                              </div>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <PieChart>
-                                  <Pie
-                                    data={data}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={2}
-                                    dataKey="value"
-                                    label={({ name, percentage }) => `${percentage}%`}
-                                    labelLine={false}
-                                  >
-                                    {data.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Pie>
-                                  <RechartsTooltip 
-                                    formatter={(value: any) => [`${value} participant${value > 1 ? 's' : ''}`, 'Nombre']}
-                                    contentStyle={{ 
-                                      backgroundColor: 'white', 
-                                      border: '1px solid var(--border)',
-                                      borderRadius: '8px'
-                                    }}
-                                  />
-                                  <Legend 
-                                    verticalAlign="bottom" 
-                                    height={36}
-                                    iconType="circle"
-                                    wrapperStyle={{ fontSize: '12px' }}
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                        );
-                      })()}
-
-                      {/* Fluidité du parcours */}
-                      {stats.categoricalStats.pathFluidity && (() => {
-                        const COLORS = {
-                          'direct': 'var(--success)',
-                          'hesitant': 'var(--warning)',
-                          'hesitations': 'var(--warning)',
-                          'erratic': 'var(--destructive)'
-                        };
-                        const data = Object.entries(stats.categoricalStats.pathFluidity).map(([key, count]) => {
-                          const total = Object.values(stats.categoricalStats.pathFluidity).reduce((sum, c) => sum + c, 0);
-                          return {
-                            name: pathFluidityLabels[key] || key,
-                            value: count,
-                            percentage: ((count / total) * 100).toFixed(0),
-                            fill: COLORS[key as keyof typeof COLORS] || 'var(--accent)'
-                          };
-                        }).sort((a, b) => b.value - a.value);
-                        
-                        return (
-                          <Card className="shadow-md border-[var(--border)]">
-                            <CardContent className="pt-6 space-y-4">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Navigation className="w-5 h-5 text-[var(--accent)]" />
-                                <h3 className="text-[var(--foreground)]">Fluidité du parcours</h3>
-                              </div>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <PieChart>
-                                  <Pie
-                                    data={data}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={2}
-                                    dataKey="value"
-                                    label={({ name, percentage }) => `${percentage}%`}
-                                    labelLine={false}
-                                  >
-                                    {data.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Pie>
-                                  <RechartsTooltip 
-                                    formatter={(value: any) => [`${value} participant${value > 1 ? 's' : ''}`, 'Nombre']}
-                                    contentStyle={{ 
-                                      backgroundColor: 'white', 
-                                      border: '1px solid var(--border)',
-                                      borderRadius: '8px'
-                                    }}
-                                  />
-                                  <Legend 
-                                    verticalAlign="bottom" 
-                                    height={36}
-                                    iconType="circle"
-                                    wrapperStyle={{ fontSize: '12px' }}
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                        );
-                      })()}
-
-                      {/* Réaction émotionnelle */}
-                      {stats.categoricalStats.emotionalReaction && (() => {
-                        const COLORS = {
-                          'positive': 'var(--success)',
-                          'neutral': 'var(--warning)',
-                          'frustrated': 'var(--destructive)'
-                        };
-                        const data = Object.entries(stats.categoricalStats.emotionalReaction).map(([key, count]) => {
-                          const total = Object.values(stats.categoricalStats.emotionalReaction).reduce((sum, c) => sum + c, 0);
-                          return {
-                            name: emotionalReactionLabels[key] || key,
-                            value: count,
-                            percentage: ((count / total) * 100).toFixed(0),
-                            fill: COLORS[key as keyof typeof COLORS] || 'var(--accent)'
-                          };
-                        }).sort((a, b) => b.value - a.value);
-                        
-                        return (
-                          <Card className="shadow-md border-[var(--border)]">
-                            <CardContent className="pt-6 space-y-4">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Smile className="w-5 h-5 text-[var(--accent)]" />
-                                <h3 className="text-[var(--foreground)]">Réaction émotionnelle</h3>
-                              </div>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <PieChart>
-                                  <Pie
-                                    data={data}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={2}
-                                    dataKey="value"
-                                    label={({ name, percentage }) => `${percentage}%`}
-                                    labelLine={false}
-                                  >
-                                    {data.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Pie>
-                                  <RechartsTooltip 
-                                    formatter={(value: any) => [`${value} participant${value > 1 ? 's' : ''}`, 'Nombre']}
-                                    contentStyle={{ 
-                                      backgroundColor: 'white', 
-                                      border: '1px solid var(--border)',
-                                      borderRadius: '8px'
-                                    }}
-                                  />
-                                  <Legend 
-                                    verticalAlign="bottom" 
-                                    height={36}
-                                    iconType="circle"
-                                    wrapperStyle={{ fontSize: '12px' }}
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                        );
-                      })()}
-
-                      {/* Durée estimée */}
-                      {stats.categoricalStats.duration && (() => {
-                        const COLORS = {
-                          'very-fast': '#4CAF50',
-                          'fast': 'var(--success)',
-                          'medium': 'var(--warning)',
-                          'long': '#FF9800',
-                          'very-long': 'var(--destructive)'
-                        };
-                        const data = Object.entries(stats.categoricalStats.duration).map(([key, count]) => {
-                          const total = Object.values(stats.categoricalStats.duration).reduce((sum, c) => sum + c, 0);
-                          return {
-                            name: durationLabels[key] || key,
-                            value: count,
-                            percentage: ((count / total) * 100).toFixed(0),
-                            fill: COLORS[key as keyof typeof COLORS] || 'var(--accent)'
-                          };
-                        }).sort((a, b) => b.value - a.value);
-                        
-                        return (
-                          <Card className="shadow-md border-[var(--border)]">
-                            <CardContent className="pt-6 space-y-4">
-                              <div className="flex items-center gap-2 mb-2">
-                                <Clock className="w-5 h-5 text-[var(--accent)]" />
-                                <h3 className="text-[var(--foreground)]">Durée estimée</h3>
-                              </div>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <PieChart>
-                                  <Pie
-                                    data={data}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={2}
-                                    dataKey="value"
-                                    label={({ name, percentage }) => `${percentage}%`}
-                                    labelLine={false}
-                                  >
-                                    {data.map((entry, index) => (
-                                      <Cell key={`cell-${index}`} fill={entry.fill} />
-                                    ))}
-                                  </Pie>
-                                  <RechartsTooltip 
-                                    formatter={(value: any) => [`${value} participant${value > 1 ? 's' : ''}`, 'Nombre']}
-                                    contentStyle={{ 
-                                      backgroundColor: 'white', 
-                                      border: '1px solid var(--border)',
-                                      borderRadius: '8px'
-                                    }}
-                                  />
-                                  <Legend 
-                                    verticalAlign="bottom" 
-                                    height={36}
-                                    iconType="circle"
-                                    wrapperStyle={{ fontSize: '12px' }}
-                                  />
-                                </PieChart>
-                              </ResponsiveContainer>
-                            </CardContent>
-                          </Card>
-                        );
-                      })()}
-                    </div>
-                  </CollapsibleContent>
-                </Collapsible>
+                <BehavioralSynthesis 
+                  categoricalStats={stats.categoricalStats}
+                  stats={stats}
+                  globalSuccessRate={stats.successRate}
+                  globalEaseScore={stats.numericalMetrics.ease !== undefined ? stats.numericalMetrics.ease.totalScore / stats.numericalMetrics.ease.count : undefined}
+                  globalAutonomyRate={stats.autonomyRate !== null ? stats.autonomyRate : undefined}
+                />
               </div>
             </div>
           )}
 
+
+
           {/* ============================================ */}
           {/* SECTION 3: SYNTHÈSE QUALITATIVE */}
           {/* ============================================ */}
-          <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
+          <div id="section-qualitative" className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
             <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
               <div className="flex items-center gap-4">
                 <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
@@ -2501,7 +2205,7 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           {/* ============================================ */}
           {/* SECTION 5: PERFORMANCE PAR TÂCHE */}
           {/* ============================================ */}
-          <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
+          <div id="section-tasks" className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
             <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -2744,14 +2448,14 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
           {/* ============================================ */}
           {/* SECTION 6: SESSIONS DÉTAILLÉES */}
           {/* ============================================ */}
-          <div className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
+          <div id="section-sessions" className="bg-white border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden shadow-sm">
             <div className="p-6 border-b-2 border-[var(--accent)] bg-[var(--accent)]">
               <div className="flex items-center gap-4">
                 <div className="p-2.5 bg-white/20 rounded-[var(--radius)]">
                   <Users className="w-6 h-6 text-[var(--accent-foreground)]" />
                 </div>
                 <div>
-                  <h2 className="text-[var(--accent-foreground)]">Sessions détaillées</h2>
+                  <h2 className="text-[var(--accent-foreground)]">Sessions d��taillées</h2>
                   <p className="text-[var(--accent-foreground)]/70">Cliquez pour voir les détails de chaque session</p>
                 </div>
               </div>
@@ -2784,8 +2488,16 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                         })}</span>
                       </div>
                       
-                      {/* Right: Role Badge */}
-                      <Badge variant="secondary" className="bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]/30 mr-2">{session.participant.role}</Badge>
+                      {/* Right: Badges */}
+                      <div className="flex items-center gap-2 mr-2">
+                        <Badge variant="secondary" className="bg-[var(--accent)]/10 text-[var(--accent)] border-[var(--accent)]/30">{session.participant.role}</Badge>
+                        {session.recordingUrl && (
+                          <Badge variant="secondary" className="bg-violet-100 text-violet-700 border-violet-200 flex items-center gap-1">
+                            <Video className="w-3 h-3" />
+                            Vidéo
+                          </Badge>
+                        )}
+                      </div>
                       
                       {/* Chevron */}
                       <AccordionTrigger className="hover:no-underline w-auto mr-2" data-accordion-trigger />
@@ -2811,8 +2523,17 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                                   Modifier la session
                                 </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleUploadRecording(session.id)} className="cursor-pointer">
-                                  <Upload className="w-4 h-4 mr-2" />
-                                  Importer enregistrement
+                                  {session.recordingUrl ? (
+                                    <>
+                                      <Video className="w-4 h-4 mr-2" />
+                                      Modifier l'enregistrement
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Upload className="w-4 h-4 mr-2" />
+                                      Ajouter un enregistrement
+                                    </>
+                                  )}
                                 </DropdownMenuItem>
                                 {session.recordingUrl && (
                                   <DropdownMenuItem 
@@ -2844,110 +2565,21 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                     </div>
                     <AccordionContent>
                       <div className="space-y-4 pt-4 px-4 pb-4">
-                        {/* Recording and Transcription Section */}
-                        {(session.recordingUrl || session.transcription) && (
-                          <Tabs defaultValue="recording" className="w-full">
-                            <TabsList className="grid w-full grid-cols-2">
-                              <TabsTrigger value="recording" className="flex items-center gap-2">
-                                <Video className="w-4 h-4" />
-                                Enregistrement
-                              </TabsTrigger>
-                              <TabsTrigger value="transcription" className="flex items-center gap-2">
-                                <FileTextIcon className="w-4 h-4" />
-                                Transcription
-                              </TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="recording" className="space-y-3">
-                              {session.recordingUrl ? (
-                                <div className="space-y-3">
-                                  <div className="bg-black rounded-[var(--radius)] overflow-hidden">
-                                    <VideoPlayer
-                                      ref={(ref) => (videoPlayerRefs.current[session.id] = ref)}
-                                      src={session.recordingUrl}
-                                      className="w-full max-h-[400px]"
-                                    />
-                                  </div>
-                                  
-                                  {/* Timestamps Navigation */}
-                                  {session.timestamps && session.timestamps.length > 0 && (
-                                    <div className="space-y-2">
-                                      <h4 className="text-sm text-[var(--foreground)]">Points clés de la vidéo</h4>
-                                      <div className="space-y-2">
-                                        {session.timestamps.map((timestamp) => (
-                                          <button
-                                            key={timestamp.id}
-                                            onClick={() => seekToTimestamp(session.id, timestamp.time)}
-                                            className="w-full flex items-start gap-3 p-3 bg-[var(--muted)]/20 hover:bg-[var(--muted)]/40 rounded-[var(--radius)] border border-[var(--border)] transition-colors text-left group"
-                                          >
-                                            <div className="flex items-center justify-center w-8 h-8 bg-[var(--accent)]/20 rounded-[var(--radius-sm)] flex-shrink-0 group-hover:bg-[var(--accent)]/30 transition-colors">
-                                              <Play className="w-4 h-4 text-[var(--accent)]" />
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                              <div className="flex items-center gap-2">
-                                                <span className="text-xs text-[var(--accent)]">{formatTime(timestamp.time)}</span>
-                                                <span className="text-sm text-[var(--foreground)]">{timestamp.label}</span>
-                                              </div>
-                                              {timestamp.description && (
-                                                <p className="text-xs text-[var(--muted-foreground)] mt-1">
-                                                  {timestamp.description}
-                                                </p>
-                                              )}
-                                            </div>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="p-6 text-center text-[var(--muted-foreground)] bg-[var(--muted)]/20 rounded-[var(--radius)] border border-dashed border-[var(--border)]">
-                                  Aucun enregistrement disponible
-                                </div>
-                              )}
-                            </TabsContent>
-                            <TabsContent value="transcription" className="space-y-3">
-                              {session.transcription || (session.timestamps && session.timestamps.length > 0) ? (
-                                <div className="space-y-3">
-                                  {/* Timestamps Quick Navigation */}
-                                  {session.timestamps && session.timestamps.length > 0 && (
-                                    <div className="p-3 bg-[var(--accent)]/5 rounded-[var(--radius)] border border-[var(--accent)]/20">
-                                      <h4 className="text-sm text-[var(--foreground)] mb-2 flex items-center gap-2">
-                                        <Clock className="w-4 h-4 text-[var(--accent)]" />
-                                        Navigation rapide
-                                      </h4>
-                                      <div className="flex flex-wrap gap-2">
-                                        {session.timestamps.map((timestamp) => (
-                                          <button
-                                            key={timestamp.id}
-                                            onClick={() => seekToTimestamp(session.id, timestamp.time)}
-                                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-[var(--accent)]/10 rounded-[var(--radius-sm)] border border-[var(--border)] transition-colors text-xs group"
-                                            title={timestamp.description}
-                                          >
-                                            <Play className="w-3 h-3 text-[var(--accent)]" />
-                                            <span className="text-[var(--accent)]">{formatTime(timestamp.time)}</span>
-                                            <span className="text-[var(--foreground)]">{timestamp.label}</span>
-                                          </button>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  {/* Transcription Text */}
-                                  {session.transcription && (
-                                    <div className="p-4 bg-[var(--muted)]/20 rounded-[var(--radius)] border border-[var(--border)] max-h-[400px] overflow-y-auto">
-                                      <p className="text-sm text-[var(--foreground)] whitespace-pre-wrap leading-relaxed">
-                                        {session.transcription}
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="p-6 text-center text-[var(--muted-foreground)] bg-[var(--muted)]/20 rounded-[var(--radius)] border border-dashed border-[var(--border)]">
-                                  Aucune transcription ou timestamp disponible
-                                </div>
-                              )}
-                            </TabsContent>
-                          </Tabs>
+                        {/* Recording Section */}
+                        {session.recordingUrl && (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2 text-[var(--muted-foreground)]">
+                              <Video className="w-4 h-4" />
+                              <span className="text-sm">Enregistrement de la session</span>
+                            </div>
+                            <div className="bg-black rounded-[var(--radius)] overflow-hidden">
+                              <VideoPlayer
+                                ref={(ref) => (videoPlayerRefs.current[session.id] = ref)}
+                                src={session.recordingUrl}
+                                className="w-full max-h-[400px]"
+                              />
+                            </div>
+                          </div>
                         )}
 
                         <div className="flex items-center gap-4 text-sm p-3 bg-[var(--muted)]/30 rounded-[var(--radius)] border border-[var(--border)] flex-wrap">
@@ -3025,6 +2657,11 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
                                 const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
                                 
                                 if (metricId === 'ease' && (isDiscovery || isPostTest || isBonus)) {
+                                  return false;
+                                }
+                                
+                                // Les métriques "valuePropositionClarity" et "firstImpression" s'affichent UNIQUEMENT pour la tâche 1
+                                if ((metricId === 'valuePropositionClarity' || metricId === 'firstImpression') && !isDiscovery) {
                                   return false;
                                 }
                                 
@@ -3147,167 +2784,43 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
         </>
       )}
 
-      {/* Upload Recording Dialog */}
+      {/* Video URL Dialog */}
       <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Importer l'enregistrement de la session</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Video className="w-5 h-5" />
+              {videoUrl ? 'Modifier l\'enregistrement' : 'Ajouter un enregistrement'}
+            </DialogTitle>
             <DialogDescription>
-              Importez la vidéo/audio de la session Google Meets et copiez-collez la transcription automatique.
+              Ajoutez le lien de votre vidéo Google Drive, YouTube ou autre plateforme.
             </DialogDescription>
           </DialogHeader>
           
-          <div className="space-y-6">
-            {/* File Upload */}
+          <div className="space-y-3">
+            {/* Video URL */}
             <div className="space-y-2">
-              <Label htmlFor="recording-file">Fichier vidéo/audio *</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  ref={fileInputRef}
-                  id="recording-file"
-                  type="file"
-                  accept="video/*,audio/*"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex items-center gap-2"
-                >
-                  <Upload className="w-4 h-4" />
-                  Choisir un fichier
-                </Button>
-                {uploadFile && (
-                  <span className="text-sm text-[var(--muted-foreground)] flex items-center gap-2">
-                    <Video className="w-4 h-4" />
-                    {uploadFile.name} ({(uploadFile.size / 1024 / 1024).toFixed(2)} MB)
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-[var(--muted-foreground)]">
-                Formats acceptés: MP4, MOV, AVI, MP3, WAV, etc.
-              </p>
-            </div>
-
-            {/* Transcription */}
-            <div className="space-y-2">
-              <Label htmlFor="transcription">Transcription (optionnel)</Label>
-              <Textarea
-                id="transcription"
-                placeholder="Collez ici la transcription automatique de Google Meets..."
-                value={transcriptionText}
-                onChange={(e) => setTranscriptionText(e.target.value)}
-                rows={6}
+              <Label htmlFor="video-url" className="flex items-center gap-2">
+                URL de la vidéo *
+                <Badge variant="secondary" className="text-xs">Google Drive, YouTube, Vimeo...</Badge>
+              </Label>
+              <Input
+                id="video-url"
+                type="url"
+                placeholder="https://drive.google.com/file/d/..."
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
                 className="font-mono text-sm"
+                autoFocus
               />
-              <p className="text-xs text-[var(--muted-foreground)]">
-                Astuce: Dans Google Meets, activez les sous-titres puis copiez le texte affich��.
-              </p>
-            </div>
-
-            {/* Timestamps */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <Label>Points clés de la vidéo (optionnel)</Label>
-                <div className="flex items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={autoGenerateTimestamps}
-                    className="text-xs h-7"
-                  >
-                    <Zap className="w-3 h-3 mr-1" />
-                    Auto-générer
-                  </Button>
-                  <Badge variant="secondary" className="text-xs">
-                    {timestamps.length} timestamp{timestamps.length !== 1 ? 's' : ''}
-                  </Badge>
-                </div>
+              <div className="space-y-1">
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  💡 <strong>Google Drive:</strong> Partagez la vidéo → "Toute personne disposant du lien" → Copiez le lien
+                </p>
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  💡 <strong>YouTube:</strong> Utilisez l'URL de la vidéo (publique ou non répertoriée)
+                </p>
               </div>
-              
-              {/* Add Timestamp Form */}
-              <div className="grid grid-cols-12 gap-2">
-                <div className="col-span-2">
-                  <Input
-                    placeholder="MM:SS"
-                    value={newTimestamp.time}
-                    onChange={(e) => setNewTimestamp({ ...newTimestamp, time: e.target.value })}
-                    className="text-sm"
-                  />
-                </div>
-                <div className="col-span-4">
-                  <Input
-                    placeholder="Label (ex: Tâche 1)"
-                    value={newTimestamp.label}
-                    onChange={(e) => setNewTimestamp({ ...newTimestamp, label: e.target.value })}
-                    className="text-sm"
-                  />
-                </div>
-                <div className="col-span-5">
-                  <Input
-                    placeholder="Description (optionnel)"
-                    value={newTimestamp.description}
-                    onChange={(e) => setNewTimestamp({ ...newTimestamp, description: e.target.value })}
-                    className="text-sm"
-                  />
-                </div>
-                <div className="col-span-1">
-                  <Button
-                    type="button"
-                    size="sm"
-                    onClick={addTimestamp}
-                    className="w-full h-full p-0"
-                  >
-                    <Plus className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
-              
-              <p className="text-xs text-[var(--muted-foreground)]">
-                Ajoutez des repères temporels pour naviguer rapidement dans la vidéo (format: MM:SS ou HH:MM:SS)
-              </p>
-
-              {/* Timestamps List */}
-              {timestamps.length > 0 && (
-                <div className="space-y-2 max-h-[200px] overflow-y-auto p-3 bg-[var(--muted)]/10 rounded-[var(--radius)] border border-[var(--border)]">
-                  {timestamps.map((timestamp) => (
-                    <div
-                      key={timestamp.id}
-                      className="flex items-start gap-2 p-2 bg-white rounded-[var(--radius-sm)] border border-[var(--border)] group hover:border-[var(--accent)]/30 transition-colors"
-                    >
-                      <Clock className="w-4 h-4 text-[var(--accent)] mt-0.5 flex-shrink-0" />
-                      <button
-                        onClick={() => editTimestamp(timestamp)}
-                        className="flex-1 min-w-0 text-left hover:opacity-75 transition-opacity"
-                        title="Cliquer pour éditer"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-[var(--accent)]">{formatTime(timestamp.time)}</span>
-                          <span className="text-sm text-[var(--foreground)]">{timestamp.label}</span>
-                        </div>
-                        {timestamp.description && (
-                          <p className="text-xs text-[var(--muted-foreground)] mt-0.5">
-                            {timestamp.description}
-                          </p>
-                        )}
-                      </button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => removeTimestamp(timestamp.id)}
-                        className="h-6 w-6 p-0 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                        title="Supprimer"
-                      >
-                        <XIcon className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
 
@@ -3321,18 +2834,18 @@ export function ResultsView({ onEditSession, isActive, isReadOnly = false }: Res
             </Button>
             <Button
               onClick={submitRecording}
-              disabled={!uploadFile || isUploading}
+              disabled={!videoUrl.trim() || isUploading}
               className="flex items-center gap-2"
             >
               {isUploading ? (
                 <>
                   <RefreshCw className="w-4 h-4 animate-spin" />
-                  Import en cours...
+                  Enregistrement...
                 </>
               ) : (
                 <>
-                  <Upload className="w-4 h-4" />
-                  Importer
+                  <Video className="w-4 h-4" />
+                  Enregistrer
                 </>
               )}
             </Button>

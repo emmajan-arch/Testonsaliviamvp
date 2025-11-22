@@ -38,7 +38,7 @@ export interface TaskResult {
   clicks?: number;
   hesitations?: number;
   errorsCount?: number;
-  skipped?: boolean; // Pour marquer une tâche comme non effectuée (optionnelle - tâche 10)
+  // skipped?: boolean; supprimé - toutes les tâches sont obligatoires (sauf optionnelles dans protocole)
 }
 
 export interface TestSession {

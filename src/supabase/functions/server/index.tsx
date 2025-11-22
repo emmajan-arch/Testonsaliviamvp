@@ -596,6 +596,86 @@ app.get("/make-server-a80e52b7/protocol/debug", async (c) => {
   }
 });
 
+// Fix Task 9 endpoint - répare automatiquement le Score d'adoption
+app.post("/make-server-a80e52b7/protocol/fix-task9", async (c) => {
+  try {
+    console.log("🔧 Fix Task 9 - Début de la réparation...");
+    const protocol = await kv.get("alivia:protocol:tasks");
+    
+    if (!protocol || !protocol.tasks || !Array.isArray(protocol.tasks)) {
+      console.log("⚠️ Aucun protocole trouvé");
+      return c.json({ 
+        success: false, 
+        message: "Aucun protocole trouvé",
+        needsReload: false
+      });
+    }
+    
+    // Trouver la tâche 9
+    const task9Index = protocol.tasks.findIndex((t: any) => t.id === 9);
+    
+    if (task9Index === -1) {
+      console.log("⚠️ Tâche 9 introuvable");
+      return c.json({ 
+        success: false, 
+        message: "Tâche 9 introuvable",
+        needsReload: false
+      });
+    }
+    
+    const task9 = protocol.tasks[task9Index];
+    console.log("📋 Tâche 9 actuelle:", task9);
+    console.log("📋 metricsFields actuels:", task9.metricsFields);
+    
+    // Vérifier si le Score d'adoption est déjà présent
+    const correctMetricsFields = ['postTestFrustrations', 'postTestDataStorage', 'postTestPracticalUse', 'postTestAdoption', 'notes'];
+    const hasAllFields = correctMetricsFields.every(field => 
+      task9.metricsFields?.includes(field)
+    );
+    
+    if (hasAllFields) {
+      console.log("✅ Le protocole est déjà correct !");
+      return c.json({ 
+        success: true, 
+        message: "Protocole déjà correct",
+        updated: false,
+        needsReload: false
+      });
+    }
+    
+    // Mettre à jour la tâche 9
+    protocol.tasks[task9Index] = {
+      ...task9,
+      metricsFields: correctMetricsFields
+    };
+    
+    // Mettre à jour le timestamp
+    protocol.timestamp = Date.now();
+    
+    // Sauvegarder
+    await kv.set("alivia:protocol:tasks", protocol);
+    
+    console.log("✅ Protocole corrigé côté serveur !");
+    console.log("📋 Nouveaux metricsFields:", protocol.tasks[task9Index].metricsFields);
+    
+    return c.json({ 
+      success: true, 
+      message: "Score d'adoption restauré !",
+      updated: true,
+      needsReload: true,
+      oldFields: task9.metricsFields,
+      newFields: correctMetricsFields,
+      timestamp: protocol.timestamp
+    });
+  } catch (error) {
+    console.error("❌ Error fixing task 9:", error);
+    return c.json({ 
+      error: "Failed to fix task 9", 
+      details: String(error) 
+    }, 500);
+  }
+});
+
 // Get global protocol sections
 app.get("/make-server-a80e52b7/protocol/sections", async (c) => {
   try {
@@ -627,6 +707,62 @@ app.post("/make-server-a80e52b7/protocol/sections", async (c) => {
   } catch (error) {
     console.error("Error saving protocol sections:", error);
     return c.json({ error: "Failed to save protocol sections", details: String(error) }, 500);
+  }
+});
+
+// ========== SLIDES MANAGEMENT ROUTES ==========
+
+// Get slides
+app.get("/make-server-a80e52b7/slides", async (c) => {
+  try {
+    console.log("📖 GET /slides - Chargement des slides...");
+    const slides = await kv.get("alivia:presentation:slides");
+    
+    if (!slides) {
+      console.log("⚠️ Aucune slide trouvée dans la base");
+      return c.json({ slides: [] });
+    }
+    
+    console.log("✅ Slides chargées:", slides.length, "slide(s)");
+    return c.json({ slides: slides || [] });
+  } catch (error) {
+    console.error("❌ Error fetching slides:", error);
+    return c.json({ error: "Failed to fetch slides", details: String(error) }, 500);
+  }
+});
+
+// Save slides
+app.post("/make-server-a80e52b7/slides", async (c) => {
+  try {
+    const body = await c.req.json();
+    
+    if (!body.slides || !Array.isArray(body.slides)) {
+      console.log("❌ Données de slides invalides");
+      return c.json({ error: "Invalid slides data" }, 400);
+    }
+    
+    console.log("💾 POST /slides - Sauvegarde de", body.slides.length, "slide(s)");
+    await kv.set("alivia:presentation:slides", body.slides);
+    console.log("✅ Slides sauvegardées avec succès");
+    
+    return c.json({ success: true });
+  } catch (error) {
+    console.error("❌ Error saving slides:", error);
+    return c.json({ error: "Failed to save slides", details: String(error) }, 500);
+  }
+});
+
+// Delete all slides
+app.delete("/make-server-a80e52b7/slides", async (c) => {
+  try {
+    console.log("🗑️ DELETE /slides - Suppression de toutes les slides...");
+    await kv.del("alivia:presentation:slides");
+    console.log("✅ Toutes les slides ont été supprimées");
+    
+    return c.json({ success: true, message: "Toutes les slides ont été supprimées" });
+  } catch (error) {
+    console.error("❌ Error deleting slides:", error);
+    return c.json({ error: "Failed to delete slides", details: String(error) }, 500);
   }
 });
 

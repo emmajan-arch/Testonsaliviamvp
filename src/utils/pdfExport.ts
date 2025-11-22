@@ -542,7 +542,26 @@ export const generateCompletePDF = ({ sessions, stats }: PDFExportOptions) => {
       doc.setTextColor(...c.lightText);
       const metrics = [];
       
-      if (typeof task.ease === 'number') metrics.push(`Facilité: ${task.ease}/10`);
+      // Détection du type de tâche pour afficher les bonnes métriques
+      const isPostTest = task.title?.includes('Questions Post-Test');
+      const isDiscovery = task.taskId === 1 || task.title?.includes('Découverte');
+      const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
+      
+      // Facilité : UNIQUEMENT pour tâches 2-8 et 10 (pas découverte, pas post-test, pas bonus)
+      if (typeof task.ease === 'number' && !isDiscovery && !isPostTest && !isBonus) {
+        metrics.push(`Facilité: ${task.ease}/10`);
+      }
+      
+      // Compréhension d'Alivia : UNIQUEMENT pour tâche 1 (découverte)
+      if (typeof task.valuePropositionClarity === 'number' && isDiscovery) {
+        metrics.push(`Compréhension d'Alivia: ${task.valuePropositionClarity}/10`);
+      }
+      
+      // Premières impressions : UNIQUEMENT pour tâche 1 (découverte)
+      if (typeof task.firstImpression === 'number' && isDiscovery) {
+        metrics.push(`Premières impressions: ${task.firstImpression}/10`);
+      }
+      
       if (task.duration) metrics.push(`Durée: ${task.duration}`);
       if (task.autonomy) {
         const autonomyLabels: Record<string, string> = {

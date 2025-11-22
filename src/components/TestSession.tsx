@@ -12,8 +12,9 @@ import { RadioGroup, RadioGroupItem } from './ui/radio-group';
 import { Checkbox } from './ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from './ui/collapsible';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from './ui/alert-dialog';
+import { MissingTasksAlert } from './MissingTasksAlert';
 import { toast } from 'sonner@2.0.3';
-import { Save, Trash2, PlayCircle, CheckCircle2, Lightbulb, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Cloud, FileText, Zap, Sparkles, Eye, Clock, User, Users, Activity, Smile, Frown, Search, ThumbsUp, HelpCircle, XCircle } from 'lucide-react';
+import { Save, Trash2, PlayCircle, CheckCircle2, Lightbulb, ChevronLeft, ChevronRight, ChevronDown, MessageSquare, Cloud, FileText, Zap, Sparkles, Eye, Clock, User, Users, Activity, Smile, Frown, Search, ThumbsUp, HelpCircle, XCircle, AlertCircle } from 'lucide-react';
 import { saveSession as saveToSupabase } from '../utils/supabase/sessions';
 import { getProtocolFromSupabase } from '../utils/supabase/protocol';
 
@@ -44,7 +45,7 @@ interface TaskResult {
   postTestPracticalUse?: string;
   postTestAdoption?: number; // Score d'adoption (échelle 1-10) : "A quel point vous voyez utiliser le produit au quotidien ?"
   customMetrics?: Record<string, any>;
-  skipped?: boolean; // Pour marquer une tâche comme non effectuée (optionnelle)
+  // skipped?: boolean; supprimé - toutes les tâches sont obligatoires
 }
 
 interface TestSessionProps {
@@ -217,34 +218,9 @@ const defaultTestTasks = [
       'Valeur perçue dans le quotidien professionnel',
       'Score d\'adoption global',
     ],
-    metrics: [
-      'Facilité',
-      'Satisfaction globale',
-      'Clarté de la value proposition',
-      'Intention d\'usage',
-    ],
+    metrics: [],
     tip: 'C\'est le moment de synthèse : laissez le participant s\'exprimer librement. Encouragez-le à partager ses vraies impressions sans filtre. Les insights les plus précieux viennent souvent ici.',
-    metricsFields: ['postTestQuestions', 'notes']
-  },
-  {
-    id: 10,
-    title: 'Créer un assistant',
-    icon: 'PlusCircle',
-    description: 'Processus de création d\'un nouvel assistant (Tâche facultative)',
-    scenario: 'Créez un nouvel assistant dédié aux documents financiers Polycea.',
-    tasks: [
-      'Logique suivie pour créer',
-      'Compréhension du processus (sources, langue, nom, rôle)',
-      'Sentiment de complexité vs simplicité',
-    ],
-    metrics: [
-      'Intuitivité du processus',
-      'Compréhension des étapes',
-      'Satisfaction',
-    ],
-    tip: 'Cette tâche est plus avancée et facultative : observez l\'ordre des étapes choisies par le participant (nom > sources > langue ou autre ?). Notez s\'il se sent perdu ou au contraire guidé par l\'interface.',
-    metricsFields: ['taskVerbatimsPositive', 'taskVerbatimsNegative', 'success', 'duration', 'autonomy', 'pathFluidity', 'emotionalReaction', 'notes', 'ease'],
-    optional: true
+    metricsFields: ['postTestFrustrations', 'postTestDataStorage', 'postTestPracticalUse', 'postTestAdoption', 'notes']
   }
 ];
 
@@ -252,20 +228,16 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   const [isTipsOpen, setIsTipsOpen] = useState(true);
   const [isTaskContextOpen, setIsTaskContextOpen] = useState(true);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [missingTasks, setMissingTasks] = useState<Array<{ id: number; title: string }>>([]);
 
   // Fonction pour nettoyer les tâches et s'assurer que :
   // - "Questions Post-Test" n'est JAMAIS optionnelle
-  // - "Créer un assistant" est TOUJOURS optionnelle
   const cleanTasks = (tasks: any[]) => {
     return tasks.map(task => {
       // Forcer "Questions Post-Test" à NE JAMAIS être optionnelle
       if (task.title === 'Questions Post-Test' || task.title?.includes('Questions Post-Test')) {
         const { optional, ...cleanedTask } = task;
         return cleanedTask;
-      }
-      // Forcer "Créer un assistant" (tâche 10) à TOUJOURS être optionnelle
-      if (task.title?.includes('Créer un assistant')) {
-        return { ...task, optional: true };
       }
       return task;
     });
@@ -369,7 +341,6 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
       // Détection du type de tâche pour initialiser les bonnes métriques
       const isDiscovery = task.id === 1 || task.title?.includes('Découverte');
       const isPostTest = task.title?.includes('Questions Post-Test');
-      const isBonus = task.title?.includes('Créer un assistant') || task.title?.includes('BONUS');
       
       return {
         taskId: task.id,
@@ -385,8 +356,8 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         verbatim: '',
         taskVerbatimsPositive: '',
         taskVerbatimsNegative: '',
-        // Ease uniquement pour les tâches 2-8 et 10 (pas découverte, pas post-test, pas bonus si bonus)
-        ease: (!isDiscovery && !isPostTest && !isBonus) ? 5 : undefined,
+        // Ease uniquement pour les tâches 2-8 (pas découverte, pas post-test)
+        ease: (!isDiscovery && !isPostTest) ? 5 : undefined,
         searchMethod: [],
         sourcesUnderstanding: 5,
         confidenceLevel: 5,
@@ -419,10 +390,50 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         
         // NETTOYAGE: Supprimer les champs post-test des tâches qui ne sont pas la tâche 9
         const cleanedTasks = sessionToEdit.tasks.map((task: TaskResult) => {
-          console.log('🔍 DEBUG LOAD - Tâche:', task.taskId, 'postTestAdoption:', task.postTestAdoption);
           // Pas de nettoyage : les champs post-test ne s'affichent que sur la tâche 9
           return task;
         });
+        
+        // ✅ CORRECTION: Reconstruire testTasks à partir des tâches de la session
+        // Cela permet d'afficher la tâche 8 dans la navigation même si elle n'est pas dans le protocole actuel
+        const reconstructedTasks = cleanedTasks.map((taskResult: TaskResult) => {
+          // Chercher la tâche dans defaultTestTasks
+          const taskTemplate = defaultTestTasks.find(t => t.id === taskResult.taskId);
+          if (taskTemplate) {
+            return taskTemplate;
+          }
+          // Si la tâche n'existe pas dans le protocole par défaut, créer une version minimale
+          return {
+            id: taskResult.taskId,
+            title: taskResult.title,
+            icon: 'HelpCircle',
+            description: taskResult.title,
+            scenario: '',
+            tasks: [],
+            metrics: [],
+            tip: '',
+            metricsFields: ['taskVerbatimsPositive', 'taskVerbatimsNegative', 'success', 'duration', 'autonomy', 'pathFluidity', 'emotionalReaction', 'notes', 'ease']
+          };
+        });
+        
+        setTestTasks(reconstructedTasks);
+        
+        // 🔍 DÉTECTION DES TÂCHES MANQUANTES
+        // Comparer le protocole actuel (defaultTestTasks) avec les tâches de la session
+        const sessionTaskIds = cleanedTasks.map((t: TaskResult) => t.taskId);
+        const protocolTaskIds = defaultTestTasks.map(t => t.id);
+        const missingTaskIds = protocolTaskIds.filter(id => !sessionTaskIds.includes(id));
+        
+        if (missingTaskIds.length > 0) {
+          const missing = missingTaskIds.map(id => {
+            const task = defaultTestTasks.find(t => t.id === id);
+            return { id, title: task?.title || 'Tâche inconnue' };
+          });
+          setMissingTasks(missing);
+          console.log('⚠️ Tâches manquantes détectées:', missing);
+        } else {
+          setMissingTasks([]);
+        }
         
         setTaskResults(cleanedTasks);
         setGeneralObservations(sessionToEdit.generalObservations || '');
@@ -500,12 +511,24 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
     if (existingIndex !== -1) updatedResults[existingIndex] = currentTaskData;
     else updatedResults.push(currentTaskData);
 
+    // S'assurer que TOUTES les tâches du protocole sont incluses dans la session
+    // Créer des résultats vides pour les tâches manquantes
+    const allTaskResults = testTasks.map(task => {
+      const existingResult = updatedResults.find(r => r.taskId === task.id);
+      if (existingResult) {
+        return existingResult;
+      } else {
+        // Créer un résultat vide pour cette tâche
+        return createEmptyResult(task);
+      }
+    });
+
     // Debug: vérifier le score d'adoption avant sauvegarde
-    const task9 = updatedResults.find(t => t.taskId === 9);
+    const task9 = allTaskResults.find(t => t.taskId === 9);
     console.log('🔍 DEBUG SAVE - Score d\'adoption tâche 9 avant sauvegarde:', task9?.postTestAdoption);
     console.log('🔍 DEBUG SAVE - Toutes les données tâche 9:', task9);
 
-    const sessionData = { participant, tasks: updatedResults, generalObservations };
+    const sessionData = { participant, tasks: allTaskResults, generalObservations };
     try {
       if (editingSessionId) {
         console.log('🔄 MODE ÉDITION - Session ID:', editingSessionId);
@@ -572,20 +595,46 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
     setTaskResults([]);
     setCurrentTaskData(createEmptyResult(testTasks[0]));
     setGeneralObservations('');
+    setMissingTasks([]);
     localStorage.removeItem('currentSession');
+  };
+
+  // Fonction pour ajouter les tâches manquantes à la session
+  const handleAddMissingTasks = () => {
+    if (missingTasks.length === 0) return;
+
+    console.log('➕ Ajout des tâches manquantes:', missingTasks);
+
+    // Créer des résultats vides pour les tâches manquantes
+    const newTaskResults: TaskResult[] = missingTasks.map(({ id }) => {
+      const taskTemplate = defaultTestTasks.find(t => t.id === id);
+      return createEmptyResult(taskTemplate || defaultTestTasks[0]);
+    });
+
+    // Fusionner avec les résultats existants et trier par taskId
+    const allTaskResults = [...taskResults, ...newTaskResults].sort((a, b) => a.taskId - b.taskId);
+    
+    // Reconstruire testTasks avec toutes les tâches du protocole
+    const allTasks = defaultTestTasks.map(task => {
+      const existingTask = testTasks.find(t => t.id === task.id);
+      return existingTask || task;
+    });
+
+    setTaskResults(allTaskResults);
+    setTestTasks(allTasks);
+    setMissingTasks([]);
+
+    toast.success(`${missingTasks.length} tâche${missingTasks.length > 1 ? 's' : ''} ajoutée${missingTasks.length > 1 ? 's' : ''} à la session`, {
+      description: 'N\'oubliez pas de sauvegarder la session après avoir complété les nouvelles tâches.'
+    });
   };
 
   const progress = ((currentTask + 1) / testTasks.length) * 100;
   const currentTaskObj = testTasks[currentTask];
   
-  // UNIQUEMENT la tâche 10 (Questions Post-Test) affiche les questions post-test
-  // On se base sur l'ID 10 car même si le titre est modifié dans le protocole, l'ID reste stable
-  const isPostTestTask = currentTaskObj?.id === 10;
-  
-  // Seules les tâches marquées optional: true sont facultatives (tâche 10 "Créer un assistant")
-  // On détecte par : propriété optional OU titre qui contient "Créer un assistant"
-  const isOptionalTask = currentTaskObj?.optional === true || 
-                         currentTaskObj?.title?.includes('Créer un assistant');
+  // UNIQUEMENT la tâche 9 (Questions Post-Test) affiche les questions post-test
+  // On se base sur l'ID 9 car même si le titre est modifié dans le protocole, l'ID reste stable
+  const isPostTestTask = currentTaskObj?.id === 9;
 
   const isTestMode = participant.name.toLowerCase().trim() === 'test';
   
@@ -617,16 +666,16 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
 
   if (!isParticipantRegistered) {
     return (
-      <div className="container mx-auto max-w-2xl py-10">
-        <Card className="border-[var(--border)] shadow-lg">
-          <CardHeader className="bg-[var(--card)] border-b border-[var(--border)]">
-            <CardTitle className="flex items-center gap-2 text-[var(--foreground)]">
-              <Users className="h-6 w-6 text-[var(--accent)]" />
+      <div className="max-w-2xl mx-auto">
+        <Card className="shadow-sm border-[var(--border)] m-[0px]">
+          <CardHeader className="bg-[var(--accent)] rounded-t-[var(--radius-lg)] p-[24px]">
+            <CardTitle className="flex items-center gap-2 text-[var(--accent-foreground)]">
+              <Users className="h-6 w-6 text-white" />
               Informations Participant
             </CardTitle>
-            <CardDescription className="text-[var(--muted-foreground)]">Avant de démarrer, merci de renseigner ces informations.</CardDescription>
+            <CardDescription className="text-white/70">Avant de démarrer, merci de renseigner ces informations.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6 pt-6">
+          <CardContent className="space-y-6 py-[24px] px-[24px]">
             <div className="space-y-2">
               <Label htmlFor="name">Nom et prénom *</Label>
               <Input 
@@ -694,7 +743,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
               </Select>
             </div>
           </CardContent>
-          <CardFooter>
+          <CardFooter className="py-[24px] px-[24px] border-t border-[var(--border)]">
             <Button 
               onClick={() => setIsParticipantRegistered(true)} 
               disabled={!participant.name || isReadOnly}
@@ -710,18 +759,18 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
 
   if (!sessionStarted) {
     return (
-      <div className="container mx-auto max-w-3xl py-10">
-        <Card className="border-[var(--border)] shadow-lg">
-          <CardHeader className="bg-[var(--card)] border-b border-[var(--border)]">
-            <CardTitle className="flex items-center gap-2 text-[var(--foreground)]">
-              <PlayCircle className="h-6 w-6 text-[var(--accent)]" />
+      <div className="max-w-3xl mx-auto">
+        <Card className="shadow-sm border-[var(--border)] m-[0px]">
+          <CardHeader className="bg-[var(--accent)] rounded-t-[var(--radius-lg)] p-[24px]">
+            <CardTitle className="flex items-center gap-2 text-[var(--accent-foreground)]">
+              <PlayCircle className="h-6 w-6 text-white" />
               Prêt à démarrer le test ?
             </CardTitle>
-            <CardDescription className="text-[var(--muted-foreground)]">
-              Participant : <span className="text-[var(--foreground)]">{participant.name}</span> {participant.role && `• ${participant.role}`}
+            <CardDescription className="text-white/70">
+              Participant : <span className="text-white">{participant.name}</span> {participant.role && `• ${participant.role}`}
             </CardDescription>
           </CardHeader>
-          <CardContent className="pt-6">
+          <CardContent className="py-[24px] px-[24px]">
             <div className="space-y-4">
               <div className="bg-[var(--muted)] p-4 rounded-lg border border-[var(--border)]">
                 <h3 className="flex items-center gap-2 text-[var(--foreground)] mb-2">
@@ -745,7 +794,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
               </div>
             </div>
           </CardContent>
-          <CardFooter className="flex gap-3">
+          <CardFooter className="flex gap-3 py-[24px] px-[24px] border-t border-[var(--border)]">
             <Button 
               variant="outline" 
               onClick={() => setIsParticipantRegistered(false)}
@@ -769,7 +818,16 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
   }
 
   return (
-    <div className="container mx-auto max-w-5xl py-6 space-y-6">
+    <div className="max-w-5xl mx-auto space-y-[24px]">
+      {/* Alert: Missing Tasks */}
+      {missingTasks.length > 0 && editingSessionId && (
+        <MissingTasksAlert
+          missingTasks={missingTasks}
+          onAddMissingTasks={handleAddMissingTasks}
+          participantName={participant.name}
+        />
+      )}
+
       {/* Test Mode Quick Nav */}
       {isTestMode && (
         <Card className="border-[var(--accent)] bg-[var(--accent)]/5">
@@ -799,7 +857,6 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
         <div className="flex justify-between items-center">
           <span className="text-[var(--muted-foreground)]">
             Tâche {currentTask + 1} / {testTasks.length}
-            {isOptionalTask && <Badge variant="outline" className="ml-2 border-[var(--accent)] text-[var(--accent)]">BONUS</Badge>}
           </span>
           <span className="text-[var(--muted-foreground)]">{Math.round(progress)}%</span>
         </div>
@@ -812,46 +869,22 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
       </div>
 
       {/* Main Task Card */}
-      <Card className="border-[var(--border)] shadow-lg">
-        <CardHeader className="bg-[var(--card)] border-b border-[var(--border)]">
+      <Card className="shadow-sm border-[var(--border)] m-[0px]">
+        <CardHeader className="bg-[var(--accent)] rounded-t-[var(--radius-lg)] p-[24px]">
           <div className="flex items-start justify-between">
             <div className="flex-1">
-              <CardTitle className="flex items-center gap-3 text-[var(--foreground)]">
-                <div className="w-10 h-10 rounded-full bg-[var(--primary)]/10 flex items-center justify-center">
-                  <span className="text-[var(--primary)]">{currentTask + 1}</span>
+              <CardTitle className="flex items-center gap-3 text-[var(--accent-foreground)]">
+                <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center">
+                  <span className="text-white">{currentTask + 1}</span>
                 </div>
                 {currentTaskObj?.title}
-                {isOptionalTask && (
-                  <Badge variant="outline" className="border-[var(--accent)] text-[var(--accent)]">
-                    BONUS
-                  </Badge>
-                )}
               </CardTitle>
-              <CardDescription className="mt-2 text-[var(--muted-foreground)]">{currentTaskObj?.description}</CardDescription>
+              <CardDescription className="mt-2 text-white/70">{currentTaskObj?.description}</CardDescription>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="pt-6 space-y-6">
-          {/* Optional Task Toggle */}
-          {isOptionalTask && (
-            <div className="bg-[var(--muted)] p-4 rounded-lg border border-[var(--border)]">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <Label className="text-[var(--foreground)]">Tâche facultative</Label>
-                  <p className="text-[var(--muted-foreground)] mt-1">
-                    Cette tâche est optionnelle. Vous pouvez choisir de ne pas la réaliser.
-                  </p>
-                </div>
-                <Switch
-                  checked={!currentTaskData.skipped}
-                  onCheckedChange={(checked) => setCurrentTaskData({...currentTaskData, skipped: !checked})}
-                  disabled={isReadOnly}
-                />
-              </div>
-            </div>
-          )}
-
+        <CardContent className="py-[24px] px-[24px] space-y-6">
           {/* Layout en 2 colonnes : Scenario à gauche, Métriques à droite */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* COLONNE GAUCHE : Contexte de la tâche */}
@@ -881,10 +914,35 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
 
             {/* COLONNE DROITE : Formulaire métriques */}
             <div className="lg:col-span-2">
-              <div className={`space-y-6 ${isOptionalTask && currentTaskData.skipped ? 'opacity-40 pointer-events-none' : ''}`}>
+              <div className="space-y-6">
             {isPostTestTask ? (
               /* POST-TEST QUESTIONS - Uniquement pour la tâche 9 */
               <div className="space-y-6 p-6 bg-[var(--muted)]/30 rounded-lg border border-[var(--border)]">
+                {/* Alerte si metricsFields manquants */}
+                {(() => {
+                  const currentMetricsFields = currentTaskObj?.metricsFields || [];
+                  const requiredFields = ['postTestFrustrations', 'postTestDataStorage', 'postTestPracticalUse', 'postTestAdoption', 'notes'];
+                  const missingFields = requiredFields.filter(f => !currentMetricsFields.includes(f));
+                  
+                  if (missingFields.length > 0 && !isReadOnly) {
+                    return (
+                      <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-3 mb-4">
+                        <div className="flex items-start gap-2">
+                          <AlertCircle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
+                          <div className="text-sm">
+                            <p className="font-medium text-yellow-900">⚠️ Configuration incomplète</p>
+                            <p className="text-yellow-800">
+                              Des champs post-test sont manquants dans la configuration. 
+                              Allez dans l'onglet <strong>Protocole</strong> pour restaurer la configuration complète.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
+                
                 <h3 className="flex items-center gap-2 text-[var(--foreground)]">
                   <MessageSquare className="w-5 h-5 text-[var(--accent)]" />
                   Questions Post-Test
@@ -1196,10 +1254,12 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
                        />
                     </div>
 
-                    {/* Standard Ease Metric - UNIQUEMENT pour tâches 2-8 (pas découverte, pas post-test, pas bonus) */}
-                    {currentTaskObj?.id !== 9 && 
-                     !currentTaskObj?.title?.includes('Questions Post-Test') &&
-                     !currentTaskObj?.optional && (
+                    {/* Standard Ease Metric - UNIQUEMENT pour tâches 2-8 (pas découverte, pas post-test) */}
+                    {(() => {
+                      const showEase = currentTaskObj?.id !== 1 && currentTaskObj?.id !== 9 && !currentTaskObj?.title?.includes('Questions Post-Test');
+                      console.log('🔍 EASE DEBUG - taskId:', currentTaskObj?.id, 'title:', currentTaskObj?.title, 'showEase:', showEase);
+                      return showEase;
+                    })() && (
                     <div className="space-y-3 pt-2 border-t border-[var(--border)]">
                       <Label>Facilité</Label>
                       <p className="text-[var(--muted-foreground)]">
@@ -1230,7 +1290,7 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
           </div>
         </CardContent>
 
-        <CardFooter className="flex justify-between border-t border-[var(--border)] pt-6">
+        <CardFooter className="flex justify-between border-t border-[var(--border)] py-[24px] px-[24px]">
           <div className="flex gap-3">
             <Button 
               variant="outline" 
