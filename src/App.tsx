@@ -6,9 +6,12 @@ import { ResultsView } from './components/ResultsView';
 import PresentationView from './components/PresentationView';
 import { AliviaLogo } from './components/AliviaLogo';
 import { LoginScreen, UserRole } from './components/LoginScreen';
+import { ConnectionStatus } from './components/ConnectionStatus';
+import { ImportProgressPanel } from './components/ImportProgressPanel';
 import { ClipboardList, PlayCircle, BarChart3, Presentation, LogOut, Shield, Eye, ChevronLeft, ChevronRight, Plus, FlaskConical, PanelLeftClose, PanelLeft } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { syncWithSupabase } from './utils/supabase/sessions';
+import { checkServerHealth } from './utils/supabase/health';
 import emmaAvatar from 'figma:asset/16d25bac4bc2165deddd3aadc01d6675f6dc94fa.png';
 
 export default function App() {
@@ -21,6 +24,19 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [currentTestId, setCurrentTestId] = useState('test-1');
 
+  // ✅ État pour le panneau de progression d'import (global)
+  const [showImportProgress, setShowImportProgress] = useState(false);
+  const [importProgressData, setImportProgressData] = useState<{
+    total: number;
+    current: number;
+    currentSlideName?: string;
+    importedSlides: Array<{ name: string; status: 'done' | 'loading' }>;
+  }>({
+    total: 0,
+    current: 0,
+    importedSlides: [],
+  });
+
   // Mock tests list (prêt pour le multi-test)
   const tests = [
     { id: 'test-1', name: 'Test UX Alivia V2', date: 'En cours' }
@@ -29,6 +45,17 @@ export default function App() {
   // Charger le protocole et les sessions
   useEffect(() => {
     const loadData = async () => {
+      // Vérifier la santé du serveur (le composant ConnectionStatus affichera l'état)
+      const healthCheck = await checkServerHealth();
+      if (!healthCheck.ok) {
+        // Ne logger que si ce n'est pas un mode hors-ligne (normal)
+        if (!healthCheck.message.includes('Mode hors-ligne') && !healthCheck.message.includes('Timeout')) {
+          console.warn('⚠️ Serveur Supabase:', healthCheck.message);
+        } else {
+          console.log('🌐 Application en mode hors-ligne (cache local actif)');
+        }
+      }
+
       // Charger le protocole
       const savedProtocol = JSON.parse(localStorage.getItem('testProtocol') || 'null');
       setProtocol(savedProtocol);
@@ -39,10 +66,8 @@ export default function App() {
         console.log('📥 Sessions chargées dans App:', syncedSessions.length, 'sessions');
         setSessions(syncedSessions);
       } catch (error) {
-        console.error('Error loading sessions in App:', error);
-        // Fallback to localStorage
-        const localSessions = JSON.parse(localStorage.getItem('testSessions') || '[]');
-        setSessions(localSessions);
+        console.error('❌ Erreur lors du chargement des sessions:', error);
+        setSessions([]);
       }
     };
     loadData();
@@ -65,7 +90,7 @@ export default function App() {
           console.log('🔄 Rechargement des sessions pour présentation:', syncedSessions.length);
           setSessions(syncedSessions);
         } catch (error) {
-          console.error('Error reloading sessions:', error);
+          console.error('❌ Erreur lors du rechargement des sessions:', error);
         }
       };
       loadData();
@@ -396,11 +421,35 @@ export default function App() {
             </TabsContent>
 
             <TabsContent value="presentation" className="mt-0">
-              <PresentationView protocol={protocol} sessions={sessions} isReadOnly={userRole === 'viewer'} />
+              <PresentationView 
+                protocol={protocol} 
+                sessions={sessions} 
+                isReadOnly={userRole === 'viewer'}
+                onImportProgressChange={setImportProgressData}
+                onShowImportProgressChange={setShowImportProgress}
+              />
             </TabsContent>
           </Tabs>
         </main>
       </div>
+
+      {/* Connection Status Indicator */}
+      <ConnectionStatus />
+
+      {/* Import Progress Panel - Flottant sur toute l'application */}
+      {showImportProgress && (
+        <ImportProgressPanel
+          total={importProgressData.total}
+          current={importProgressData.current}
+          currentSlideName={importProgressData.currentSlideName}
+          importedSlides={importProgressData.importedSlides}
+          onClose={() => setShowImportProgress(false)}
+          onGoToSlides={() => {
+            setActiveTab('presentation');
+            setShowImportProgress(false);
+          }}
+        />
+      )}
     </div>
   );
 }

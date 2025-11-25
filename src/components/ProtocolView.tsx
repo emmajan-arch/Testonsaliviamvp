@@ -978,11 +978,19 @@ export function ProtocolView({ isReadOnly = false }: ProtocolViewProps) {
             }
           }
         }
-      } catch (error) {
-        console.error('❌ Erreur lors du chargement depuis Supabase:', error);
+      } catch (error: any) {
+        // Ne pas afficher d'erreur console si c'est juste un timeout ou une erreur réseau (comportements normaux)
+        if (!error.message?.includes('Timeout') && !error.message?.includes('Failed to fetch')) {
+          console.error('❌ Erreur lors du chargement depuis Supabase:', error);
+        } else if (error.message?.includes('Timeout')) {
+          console.log('⏱️ Timeout lors du chargement du protocole (le serveur est occupé)');
+        } else if (error.message?.includes('Failed to fetch')) {
+          console.log('🌐 Serveur Supabase non accessible, utilisation du cache local');
+        }
+        
         // En mode viewer, NE PAS utiliser localStorage car il peut être obsolète
         if (isReadOnly) {
-          console.error('🚨 VIEWER: Impossible de charger depuis Supabase, utilisation des tâches par défaut');
+          console.log('👁️ VIEWER: Utilisation des tâches par défaut en attendant');
           setTasks(testTasks);
         } else {
           // Admin peut utiliser localStorage comme fallback
@@ -991,6 +999,7 @@ export function ProtocolView({ isReadOnly = false }: ProtocolViewProps) {
             try {
               const parsed = JSON.parse(savedTasks);
               if (Array.isArray(parsed) && parsed.length > 0) {
+                console.log(`📦 ${parsed.length} tâches récupérées du cache local`);
                 setTasks(parsed);
               } else {
                 setTasks(testTasks);

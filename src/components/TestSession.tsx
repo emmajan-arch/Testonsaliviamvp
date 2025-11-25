@@ -286,7 +286,16 @@ export function TestSession({ onSessionComplete, editingSessionId, isReadOnly = 
           localStorage.setItem('protocolTasks', JSON.stringify(cleaned));
           return;
         }
-      } catch (error) { console.error(error); }
+      } catch (error: any) { 
+        // Ne pas afficher d'erreur si timeout ou erreur réseau (comportements normaux)
+        if (!error.message?.includes('Timeout') && !error.message?.includes('Failed to fetch')) {
+          console.error('❌ Erreur TestSession:', error);
+        } else if (error.message?.includes('Timeout')) {
+          console.log('⏱️ Timeout, utilisation du cache local');
+        } else if (error.message?.includes('Failed to fetch')) {
+          console.log('🌐 Serveur non accessible, utilisation du cache local');
+        }
+      }
 
       const saved = localStorage.getItem('protocolTasks');
       if (saved) {

@@ -68,19 +68,20 @@ export async function fetchSessions(): Promise<TestSession[]> {
       headers: {
         'Authorization': `Bearer ${publicAnonKey}`,
         'Content-Type': 'application/json'
-      }
+      },
     });
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('Error fetching sessions from Supabase:', error);
-      throw new Error(`Failed to fetch sessions: ${response.statusText}`);
+      console.error('Erreur fetchSessions:', error);
+      throw new Error(`Erreur lors de la récupération des sessions: ${error}`);
     }
 
     const data = await response.json();
+    console.log('✅ Sessions récupérées depuis Supabase:', data.sessions?.length || 0);
     return data.sessions || [];
   } catch (error) {
-    console.error('Error in fetchSessions:', error);
+    console.error('❌ Erreur fetchSessions:', error);
     throw error;
   }
 }
@@ -99,14 +100,15 @@ export async function saveSession(session: Omit<TestSession, 'id' | 'date'>): Pr
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('Error saving session to Supabase:', error);
-      throw new Error(`Failed to save session: ${response.statusText}`);
+      console.error('❌ Erreur saveSession:', error);
+      throw new Error(`Erreur lors de la sauvegarde de la session: ${response.statusText}`);
     }
 
     const data = await response.json();
+    console.log('✅ Session sauvegardée sur Supabase');
     return data.session;
   } catch (error) {
-    console.error('Error in saveSession:', error);
+    console.error('❌ Erreur saveSession:', error);
     throw error;
   }
 }
@@ -124,30 +126,29 @@ export async function deleteSession(sessionId: number): Promise<void> {
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('Error deleting session from Supabase:', error);
-      throw new Error(`Failed to delete session: ${response.statusText}`);
+      console.error('❌ Erreur deleteSession:', error);
+      throw new Error(`Erreur lors de la suppression de la session: ${response.statusText}`);
     }
+
+    console.log('✅ Session supprimée de Supabase');
   } catch (error) {
-    console.error('Error in deleteSession:', error);
+    console.error('❌ Erreur deleteSession:', error);
     throw error;
   }
 }
 
-// Sync localStorage with Supabase (cloud is the source of truth)
+// Sync with Supabase (cloud is the source of truth)
 export async function syncWithSupabase(): Promise<TestSession[]> {
   try {
-    // Get cloud sessions - cloud is the ONLY source of truth
+    console.log('🔄 Synchronisation avec Supabase...');
+    
     const cloudSessions = await fetchSessions();
     
-    // COMPLETELY replace localStorage with cloud data
-    // This ensures deleted sessions stay deleted
-    localStorage.setItem('testSessions', JSON.stringify(cloudSessions));
-    
+    console.log('✅ Synchronisation terminée:', cloudSessions.length, 'sessions');
     return cloudSessions;
   } catch (error) {
-    console.error('Error in syncWithSupabase:', error);
-    // Fallback to local sessions if sync fails
-    return JSON.parse(localStorage.getItem('testSessions') || '[]');
+    console.error('❌ Erreur lors de la synchronisation:', error);
+    throw error;
   }
 }
 

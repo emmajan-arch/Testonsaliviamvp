@@ -13,16 +13,27 @@ const supabase = createClient(
 
 // Ensure storage bucket exists
 const BUCKET_NAME = 'make-a80e52b7-recordings';
+const SLIDES_BUCKET_NAME = 'make-a80e52b7-slides';
+
 (async () => {
   try {
     const { data: buckets } = await supabase.storage.listBuckets();
-    const bucketExists = buckets?.some(bucket => bucket.name === BUCKET_NAME);
-    if (!bucketExists) {
+    
+    // Create recordings bucket
+    const recordingsBucketExists = buckets?.some(bucket => bucket.name === BUCKET_NAME);
+    if (!recordingsBucketExists) {
       await supabase.storage.createBucket(BUCKET_NAME, { public: false });
       console.log(`Created bucket: ${BUCKET_NAME}`);
     }
+    
+    // Create slides bucket
+    const slidesBucketExists = buckets?.some(bucket => bucket.name === SLIDES_BUCKET_NAME);
+    if (!slidesBucketExists) {
+      await supabase.storage.createBucket(SLIDES_BUCKET_NAME, { public: false });
+      console.log(`Created bucket: ${SLIDES_BUCKET_NAME}`);
+    }
   } catch (error) {
-    console.error('Error creating bucket:', error);
+    console.error('Error creating buckets:', error);
   }
 })();
 
@@ -741,11 +752,137 @@ app.post("/make-server-a80e52b7/slides", async (c) => {
       return c.json({ error: "Invalid slides data" }, 400);
     }
     
-    console.log("💾 POST /slides - Sauvegarde de", body.slides.length, "slide(s)");
-    await kv.set("alivia:presentation:slides", body.slides);
-    console.log("✅ Slides sauvegardées avec succès");
+    console.log("💾 POST /slides - Traitement de", body.slides.length, "slide(s)");
     
-    return c.json({ success: true });
+    // Upload images to Storage and create slide metadata
+    const slidesMetadata = [];
+    
+    // ✅ Traiter les slides en parallèle par batches de 5 pour éviter les timeouts
+    const BATCH_SIZE = 5;
+    const totalBatches = Math.ceil(body.slides.length / BATCH_SIZE);
+    
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const start = batchIndex * BATCH_SIZE;
+      const end = Math.min(start + BATCH_SIZE, body.slides.length);
+      const batch = body.slides.slice(start, end);
+      
+      console.log(`📦 Traitement du batch ${batchIndex + 1}/${totalBatches} (slides ${start + 1}-${end})`);
+      
+      // Traiter toutes les slides du batch en parallèle
+      const batchPromises = batch.map(async (slide, localIndex) => {
+        const globalIndex = start + localIndex;
+        console.log(`📤 Upload slide ${globalIndex + 1}/${body.slides.length}: ${slide.name}`);
+        
+        try {
+          // Validation: vérifier que url existe (c'est la data URL base64)
+          if (!slide.url) {
+            console.log(`⏭️ Slide "${slide.name}" ignoré: pas d'url`);
+            return null;
+          }
+          
+          // Si l'URL est déjà une signed URL (commence par https://), la réutiliser
+          if (slide.url.startsWith('https://')) {
+            console.log(`♻️ Slide "${slide.name}" déjà stocké, réutilisation de l'URL existante`);
+            return {
+              id: slide.id,
+              name: slide.name,
+              url: slide.url,
+              figmaFileId: slide.figmaFileId,
+              figmaFrameId: slide.figmaFrameId,
+              figmaFileUrl: slide.figmaFileUrl,
+              lastSyncDate: slide.lastSyncDate,
+              contentHash: slide.contentHash // ✅ Préserver le hash existant
+            };
+          }
+          
+          // Vérifier que c'est bien une data URL
+          if (!slide.url.startsWith('data:')) {
+            console.log(`⏭️ Slide "${slide.name}" ignoré: URL invalide (ni data URL ni signed URL)`);
+            return null;
+          }
+          
+          // Extract base64 data (remove data:image/png;base64, or data:image/jpeg;base64, prefix)
+          const base64Data = slide.url.includes(',') ? slide.url.split(',')[1] : slide.url;
+          
+          // Valider que base64Data contient uniquement des caractères base64 valides
+          const base64Regex = /^[A-Za-z0-9+/]*={0,2}$/;
+          if (!base64Regex.test(base64Data)) {
+            console.error(`❌ Slide "${slide.name}": données base64 invalides`);
+            return null;
+          }
+          
+          // Convert base64 to binary
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let j = 0; j < binaryString.length; j++) {
+            bytes[j] = binaryString.charCodeAt(j);
+          }
+          
+          // Detect image type from data URL
+          const contentType = slide.url.startsWith('data:image/jpeg') || slide.url.startsWith('data:image/jpg')
+            ? 'image/jpeg'
+            : 'image/png';
+          const ext = contentType === 'image/jpeg' ? 'jpg' : 'png';
+          
+          // Upload to Storage
+          const filePath = `slides/${slide.id}.${ext}`;
+          const { error: uploadError } = await supabase.storage
+            .from(SLIDES_BUCKET_NAME)
+            .upload(filePath, bytes, {
+              contentType,
+              upsert: true
+            });
+          
+          if (uploadError) {
+            console.error(`❌ Error uploading slide ${slide.name}:`, uploadError);
+            throw uploadError;
+          }
+          
+          // Get signed URL (valid for 10 years)
+          const { data: urlData } = await supabase.storage
+            .from(SLIDES_BUCKET_NAME)
+            .createSignedUrl(filePath, 315360000); // 10 years
+          
+          if (!urlData) {
+            throw new Error('Failed to generate signed URL');
+          }
+          
+          console.log(`✅ Slide ${globalIndex + 1}/${body.slides.length} uploaded: ${slide.name}`);
+          
+          return {
+            id: slide.id,
+            name: slide.name,
+            url: urlData.signedUrl,
+            figmaFileId: slide.figmaFileId,
+            figmaFrameId: slide.figmaFrameId,
+            figmaFileUrl: slide.figmaFileUrl,
+            lastSyncDate: slide.lastSyncDate,
+            contentHash: slide.contentHash // ✅ Sauvegarder le hash du contenu
+          };
+        } catch (slideError) {
+          console.error(`❌ Error processing slide ${slide.name}:`, slideError);
+          return null;
+        }
+      });
+      
+      // Attendre que toutes les slides du batch soient traitées
+      const batchResults = await Promise.all(batchPromises);
+      
+      // Ajouter les résultats valides à slidesMetadata
+      batchResults.forEach(result => {
+        if (result) {
+          slidesMetadata.push(result);
+        }
+      });
+      
+      console.log(`✅ Batch ${batchIndex + 1}/${totalBatches} terminé (${slidesMetadata.length} slides sauvegardées au total)`);
+    }
+    
+    // Save metadata to KV (small data, no timeout)
+    await kv.set("alivia:presentation:slides", slidesMetadata);
+    console.log("✅ Slides metadata sauvegardée:", slidesMetadata.length, "slide(s)");
+    
+    return c.json({ success: true, count: slidesMetadata.length });
   } catch (error) {
     console.error("❌ Error saving slides:", error);
     return c.json({ error: "Failed to save slides", details: String(error) }, 500);
@@ -756,13 +893,56 @@ app.post("/make-server-a80e52b7/slides", async (c) => {
 app.delete("/make-server-a80e52b7/slides", async (c) => {
   try {
     console.log("🗑️ DELETE /slides - Suppression de toutes les slides...");
+    
+    // Delete from KV
     await kv.del("alivia:presentation:slides");
+    
+    // Delete all files from Storage
+    try {
+      const { data: files } = await supabase.storage
+        .from(SLIDES_BUCKET_NAME)
+        .list('slides');
+      
+      if (files && files.length > 0) {
+        const filePaths = files.map(f => `slides/${f.name}`);
+        await supabase.storage
+          .from(SLIDES_BUCKET_NAME)
+          .remove(filePaths);
+        console.log(`🗑️ ${filePaths.length} fichiers supprimés du Storage`);
+      }
+    } catch (storageError) {
+      console.error("⚠️ Error deleting slides from storage:", storageError);
+      // Continue even if storage deletion fails
+    }
+    
     console.log("✅ Toutes les slides ont été supprimées");
     
     return c.json({ success: true, message: "Toutes les slides ont été supprimées" });
   } catch (error) {
     console.error("❌ Error deleting slides:", error);
     return c.json({ error: "Failed to delete slides", details: String(error) }, 500);
+  }
+});
+
+// Get Figma token from environment
+app.get("/make-server-a80e52b7/figma-token", async (c) => {
+  try {
+    console.log('🔑 GET /figma-token - Récupération du token Figma...');
+    const token = Deno.env.get('FIGMA_ACCESS_TOKEN');
+    
+    console.log('🔑 Token présent:', !!token);
+    console.log('🔑 Token length:', token?.length || 0);
+    
+    if (!token) {
+      console.error('❌ FIGMA_ACCESS_TOKEN non défini dans les variables d\'environnement');
+      return c.json({ error: "Figma token not configured" }, 404);
+    }
+    
+    console.log('✅ Token Figma retourné avec succès');
+    return c.json({ token });
+  } catch (error) {
+    console.error("❌ Error getting Figma token:", error);
+    return c.json({ error: "Failed to get Figma token", details: String(error) }, 500);
   }
 });
 

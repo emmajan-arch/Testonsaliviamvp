@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
-import { Plus, Trash2, GripVertical, Image as ImageIcon, X } from 'lucide-react';
+import { Plus, Trash2, GripVertical, Image as ImageIcon, X, Download, FileText, Presentation } from 'lucide-react';
 import { motion, Reorder } from 'motion/react';
+import { exportSlidesToPDF } from '../utils/slidesExport';
+import { toast } from 'sonner@2.0.3';
 
 interface SlideData {
   id: string;
@@ -19,6 +21,8 @@ interface SlideManagerProps {
 export default function SlideManager({ onSlidesChange, initialSlides = [], isReadOnly = false }: SlideManagerProps) {
   const [slides, setSlides] = useState<SlideData[]>(initialSlides);
   const [isOpen, setIsOpen] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -56,6 +60,26 @@ export default function SlideManager({ onSlidesChange, initialSlides = [], isRea
     onSlidesChange(newOrder);
   };
 
+  const handleExportPDF = async () => {
+    if (slides.length === 0) {
+      toast.error('Aucune slide à exporter');
+      return;
+    }
+
+    try {
+      setIsExporting(true);
+      setShowExportMenu(false);
+      toast.info('Export PDF en cours...');
+      await exportSlidesToPDF(slides);
+      toast.success('Slides exportées en PDF avec succès !');
+    } catch (error) {
+      console.error('Erreur lors de l\'export PDF:', error);
+      toast.error('Erreur lors de l\'export PDF');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="mb-6">
       {/* Bouton pour ouvrir le gestionnaire */}
@@ -90,28 +114,72 @@ export default function SlideManager({ onSlidesChange, initialSlides = [], isRea
         className="overflow-hidden"
       >
         <div className="mt-3 p-5 bg-[var(--card)] border border-[var(--border)] rounded-[var(--radius-lg)]">
-          {/* Bouton d'import - Masqué en mode lecture seule */}
+          {/* Boutons d'action */}
+          <div className="mb-5 flex flex-wrap gap-3">
+            {/* Bouton d'import - Masqué en mode lecture seule */}
+            {!isReadOnly && (
+              <div>
+                <label
+                  htmlFor="slide-upload"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[var(--accent)] text-[var(--accent-foreground)] rounded-[var(--radius-md)] cursor-pointer hover:opacity-90 transition-opacity"
+                >
+                  <Plus className="w-4 h-4" />
+                  Importer des images
+                </label>
+                <input
+                  id="slide-upload"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleImageUpload}
+                  className="hidden"
+                />
+              </div>
+            )}
+            
+            {/* Bouton d'export */}
+            {slides.length > 0 && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowExportMenu(!showExportMenu)}
+                  disabled={isExporting}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[var(--secondary)] text-[var(--secondary-foreground)] rounded-[var(--radius-md)] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Download className="w-4 h-4" />
+                  {isExporting ? 'Export en cours...' : 'Exporter'}
+                </button>
+
+                {/* Menu d'export */}
+                {showExportMenu && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -10 }}
+                    className="absolute top-full left-0 mt-2 w-56 bg-[var(--card)] border border-[var(--border)] rounded-[var(--radius-md)] shadow-lg overflow-hidden z-10"
+                  >
+                    <button
+                      onClick={handleExportPDF}
+                      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-[var(--muted)]/30 transition-colors"
+                    >
+                      <FileText className="w-4 h-4" style={{ color: 'var(--foreground)' }} />
+                      <div className="text-left">
+                        <p style={{ color: 'var(--foreground)' }}>Exporter en PDF</p>
+                        <p className="text-xs" style={{ color: 'var(--muted-foreground)' }}>
+                          Document portable
+                        </p>
+                      </div>
+                    </button>
+                  </motion.div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Info text */}
           {!isReadOnly && (
-            <div className="mb-5">
-              <label
-                htmlFor="slide-upload"
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[var(--accent)] text-[var(--accent-foreground)] rounded-[var(--radius-md)] cursor-pointer hover:opacity-90 transition-opacity"
-              >
-                <Plus className="w-4 h-4" />
-                Importer des images
-              </label>
-              <input
-                id="slide-upload"
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handleImageUpload}
-                className="hidden"
-              />
-              <p className="mt-2 text-sm" style={{ color: 'var(--muted-foreground)' }}>
-                Formats supportés : JPG, PNG, GIF, WebP
-              </p>
-            </div>
+            <p className="mb-5 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+              Formats supportés : JPG, PNG, GIF, WebP
+            </p>
           )}
 
           {/* Liste des slides avec drag & drop */}
