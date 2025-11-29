@@ -539,6 +539,10 @@
     inset: calc(var(--spacing) * 0);
   }
 
+  .-top-1 {
+    top: calc(var(--spacing) * -1);
+  }
+
   .top-0 {
     top: calc(var(--spacing) * 0);
   }
@@ -565,6 +569,10 @@
 
   .top-full {
     top: 100%;
+  }
+
+  .-right-1 {
+    right: calc(var(--spacing) * -1);
   }
 
   .right-0 {
@@ -683,6 +691,10 @@
     margin-top: calc(var(--spacing) * 1);
   }
 
+  .mt-1\.5 {
+    margin-top: calc(var(--spacing) * 1.5);
+  }
+
   .mt-2 {
     margin-top: calc(var(--spacing) * 2);
   }
@@ -707,12 +719,20 @@
     margin-right: calc(var(--spacing) * 1);
   }
 
+  .mr-1\.5 {
+    margin-right: calc(var(--spacing) * 1.5);
+  }
+
   .mr-2 {
     margin-right: calc(var(--spacing) * 2);
   }
 
   .mr-\[0px\] {
     margin-right: 0;
+  }
+
+  .mb-0\.5 {
+    margin-bottom: calc(var(--spacing) * .5);
   }
 
   .mb-1 {
@@ -790,6 +810,10 @@
     display: inline;
   }
 
+  .inline-block {
+    display: inline-block;
+  }
+
   .inline-flex {
     display: inline-flex;
   }
@@ -832,6 +856,10 @@
 
   .h-2 {
     height: calc(var(--spacing) * 2);
+  }
+
+  .h-2\.5 {
+    height: calc(var(--spacing) * 2.5);
   }
 
   .h-3 {
@@ -914,6 +942,10 @@
     max-height: var(--radix-select-content-available-height);
   }
 
+  .max-h-64 {
+    max-height: calc(var(--spacing) * 64);
+  }
+
   .max-h-\[150px\] {
     max-height: 150px;
   }
@@ -964,6 +996,10 @@
 
   .w-2 {
     width: calc(var(--spacing) * 2);
+  }
+
+  .w-2\.5 {
+    width: calc(var(--spacing) * 2.5);
   }
 
   .w-3 {
@@ -1680,6 +1716,16 @@
     border-color: var(--color-green-500);
   }
 
+  .border-info\/20 {
+    border-color: var(--info);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-info\/20 {
+      border-color: color-mix(in oklab, var(--info) 20%, transparent);
+    }
+  }
+
   .border-input {
     border-color: var(--input);
   }
@@ -1738,6 +1784,16 @@
 
   .border-violet-200 {
     border-color: var(--color-violet-200);
+  }
+
+  .border-warning\/20 {
+    border-color: var(--warning);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .border-warning\/20 {
+      border-color: color-mix(in oklab, var(--warning) 20%, transparent);
+    }
   }
 
   .border-white\/20 {
@@ -2098,12 +2154,32 @@
     background-color: var(--color-green-600);
   }
 
+  .bg-info\/10 {
+    background-color: var(--info);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-info\/10 {
+      background-color: color-mix(in oklab, var(--info) 10%, transparent);
+    }
+  }
+
   .bg-input-background {
     background-color: var(--input-background);
   }
 
   .bg-muted {
     background-color: var(--muted);
+  }
+
+  .bg-muted\/30 {
+    background-color: var(--muted);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-muted\/30 {
+      background-color: color-mix(in oklab, var(--muted) 30%, transparent);
+    }
   }
 
   .bg-muted\/50 {
@@ -2196,6 +2272,20 @@
 
   .bg-violet-100 {
     background-color: var(--color-violet-100);
+  }
+
+  .bg-warning {
+    background-color: var(--warning);
+  }
+
+  .bg-warning\/10 {
+    background-color: var(--warning);
+  }
+
+  @supports (color: color-mix(in lab, red, red)) {
+    .bg-warning\/10 {
+      background-color: color-mix(in oklab, var(--warning) 10%, transparent);
+    }
   }
 
   .bg-white {
@@ -2785,6 +2875,10 @@
     color: var(--color-violet-700);
   }
 
+  .text-warning {
+    color: var(--warning);
+  }
+
   .text-white {
     color: var(--color-white);
   }
@@ -2833,6 +2927,10 @@
 
   .opacity-50 {
     opacity: .5;
+  }
+
+  .opacity-60 {
+    opacity: .6;
   }
 
   .opacity-70 {
@@ -3348,6 +3446,24 @@
   }
 
   @media (hover: hover) {
+    .hover\:bg-muted:hover {
+      background-color: var(--muted);
+    }
+  }
+
+  @media (hover: hover) {
+    .hover\:bg-muted\/80:hover {
+      background-color: var(--muted);
+    }
+
+    @supports (color: color-mix(in lab, red, red)) {
+      .hover\:bg-muted\/80:hover {
+        background-color: color-mix(in oklab, var(--muted) 80%, transparent);
+      }
+    }
+  }
+
+  @media (hover: hover) {
     .hover\:bg-orange-600:hover {
       background-color: var(--color-orange-600);
     }
@@ -3434,6 +3550,12 @@
   @media (hover: hover) {
     .hover\:text-accent:hover {
       color: var(--accent);
+    }
+  }
+
+  @media (hover: hover) {
+    .hover\:text-info:hover {
+      color: var(--info);
     }
   }
 
@@ -4339,6 +4461,7 @@
   --input-background: #f3f3f5;
   --switch-background: #cbced4;
   --font-weight-medium: 500;
+  --font-weight-semibold: 600;
   --font-weight-normal: 400;
   --ring: oklch(.708 0 0);
   --chart-1: oklch(.646 .222 41.116);

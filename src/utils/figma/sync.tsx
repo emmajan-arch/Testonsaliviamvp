@@ -1,3 +1,5 @@
+import { SlideData } from '../supabase/slides';
+
 const FIGMA_API_BASE = 'https://api.figma.com/v1';
 
 /**
@@ -325,6 +327,90 @@ export async function checkIndividualSlideUpdates(
     
   } catch (error) {
     console.error('❌ Erreur checkIndividualSlideUpdates:', error);
+    throw error;
+  }
+}
+
+/**
+ * Détecte les nouvelles slides ajoutées dans Figma qui ne sont pas encore synchronisées
+ * Retourne un tableau avec les informations des nouvelles frames
+ */
+export async function detectNewSlidesInFigma(
+  fileId: string,
+  accessToken: string,
+  existingSlides: SlideData[]
+): Promise<Array<{ id: string; name: string }>> {
+  try {
+    console.log('\n🔍 === DÉTECTION DES NOUVELLES SLIDES ===');
+    console.log('📂 File ID:', fileId);
+    console.log('📊 Slides existantes:', existingSlides.length);
+    
+    // 1. Récupérer les informations du fichier Figma
+    const fileInfo = await getFigmaFileInfo(fileId, accessToken);
+    
+    if (!fileInfo || !fileInfo.document) {
+      throw new Error('Impossible de récupérer les informations du fichier Figma');
+    }
+    
+    // 2. Trouver toutes les frames actuelles dans Figma
+    const figmaFrames: Array<{ id: string; name: string }> = [];
+    
+    // ✅ Taille minimale pour considérer une frame comme une slide (1920x1080px - format présentation standard)
+    const MIN_FRAME_WIDTH = 1920;
+    const MIN_FRAME_HEIGHT = 1080;
+    
+    const findFrames = (node: any) => {
+      if (!node || !node.type) return;
+      
+      if (node.type === 'FRAME' || node.type === 'COMPONENT') {
+        // ✅ Vérifier que la frame a une taille minimale (pour ignorer les icônes, petits éléments, etc.)
+        const width = node.absoluteBoundingBox?.width || 0;
+        const height = node.absoluteBoundingBox?.height || 0;
+        
+        if (width >= MIN_FRAME_WIDTH && height >= MIN_FRAME_HEIGHT) {
+          figmaFrames.push({ id: node.id, name: node.name });
+          console.log(`✅ Frame valide: "${node.name}" (${Math.round(width)}x${Math.round(height)}px)`);
+        } else {
+          console.log(`⏭️  Frame ignorée (trop petite < ${MIN_FRAME_WIDTH}x${MIN_FRAME_HEIGHT}): "${node.name}" (${Math.round(width)}x${Math.round(height)}px)`);
+        }
+        return;
+      }
+      
+      if (node.children && Array.isArray(node.children)) {
+        node.children.forEach((child: any) => findFrames(child));
+      }
+    };
+    
+    fileInfo.document.children.forEach((page: any) => {
+      if (page && page.children) {
+        page.children.forEach((child: any) => findFrames(child));
+      }
+    });
+    
+    console.log(`📊 Frames trouvées dans Figma: ${figmaFrames.length}`);
+    
+    // 3. Créer un Set des figmaFrameIds existants
+    const existingFrameIds = new Set(
+      existingSlides
+        .map(s => s.figmaFrameId)
+        .filter(id => id !== undefined) as string[]
+    );
+    
+    console.log(`📊 FrameIds existants: ${existingFrameIds.size}`);
+    
+    // 4. Trouver les nouvelles frames (qui existent dans Figma mais pas dans l'app)
+    const newFrames = figmaFrames.filter(frame => !existingFrameIds.has(frame.id));
+    
+    console.log(`\n✨ ${newFrames.length} nouvelle(s) slide(s) détectée(s)`);
+    
+    if (newFrames.length > 0) {
+      console.log('📝 Nouvelles slides:', newFrames.map(f => f.name).join(', '));
+    }
+    
+    return newFrames;
+    
+  } catch (error) {
+    console.error('❌ Erreur detectNewSlidesInFigma:', error);
     throw error;
   }
 }

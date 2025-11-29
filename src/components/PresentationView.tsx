@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { ChevronLeft, ChevronRight, Presentation, Maximize, Minimize, Upload, Trash2, Plus, Play, FileText, Download, MoreHorizontal, RefreshCw, ExternalLink, Edit, AlertCircle, Loader2 } from 'lucide-react';
@@ -7,7 +7,7 @@ import * as pdfjsLib from 'pdfjs-dist@4.8.69';
 import { saveSlidesToSupabase, getSlidesFromSupabase, deleteAllSlidesFromSupabase, SlideData } from '../utils/supabase/slides';
 import { exportSlidesToPDF } from '../utils/slidesExport';
 import { FigmaImportDialog } from './FigmaImportDialog';
-import { syncSlidesFromFigma, extractFileIdFromUrl, checkFigmaFileUpdates, checkIndividualSlideUpdates, syncSingleSlide } from '../utils/figma/sync';
+import { syncSlidesFromFigma, extractFileIdFromUrl, checkFigmaFileUpdates, checkIndividualSlideUpdates, syncSingleSlide, detectNewSlidesInFigma } from '../utils/figma/sync';
 import { getFigmaToken } from '../utils/figma/token';
 import { checkServerHealth } from '../utils/supabase/health';
 import { toast } from 'sonner@2.0.3';
@@ -37,6 +37,11 @@ interface PresentationViewProps {
     importedSlides: Array<{ name: string; status: 'done' | 'loading' }>;
   }) => void;
   onShowImportProgressChange?: (show: boolean) => void;
+  onNewSlidesInfoChange?: (info: {
+    newSlides: Array<{ id: string; name: string }>;
+    onImport: () => void;
+    isImporting: boolean;
+  } | null) => void;
 }
 
 export default function PresentationView({ 
@@ -44,7 +49,8 @@ export default function PresentationView({
   sessions, 
   isReadOnly = false,
   onImportProgressChange,
-  onShowImportProgressChange 
+  onShowImportProgressChange,
+  onNewSlidesInfoChange 
 }: PresentationViewProps) {
   const [slides, setSlides] = useState<SlideData[]>([]);
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -60,6 +66,14 @@ export default function PresentationView({
   const [modifiedSlideIds, setModifiedSlideIds] = useState<Set<string>>(new Set());
   const [syncingSlideIds, setSyncingSlideIds] = useState<Set<string>>(new Set());
   const [lastCheckTime, setLastCheckTime] = useState<Date | null>(null);
+  const [newSlidesDetected, setNewSlidesDetected] = useState<Array<{ id: string; name: string; previouslyIgnored?: boolean }>>([]);
+  const [isImportingNewSlides, setIsImportingNewSlides] = useState(false);
+  const [selectedSlideIds, setSelectedSlideIds] = useState<Set<string>>(new Set()); // ✅ Slides sélectionnées pour l'import
+  const [manuallyClosedPanel, setManuallyClosedPanel] = useState(false); // ✅ Flag pour savoir si l'utilisateur a fermé manuellement le panneau
+  const [hasPendingNotification, setHasPendingNotification] = useState(false); // ✅ Flag pour maintenir la notification visible
+  const [pendingNotificationCount, setPendingNotificationCount] = useState(0); // ✅ Nombre de slides en attente pour la notification
+  const previousNewSlidesRef = useRef<Set<string>>(new Set()); // ✅ Garder en mémoire les IDs des slides détectées précédemment
+  const ignoredSlidesRef = useRef<Set<string>>(new Set()); // ✅ Garder en mémoire les IDs des slides ignorées par l'utilisateur
   const hideControlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionsMenuRef = useRef<HTMLDivElement | null>(null);
   const checkUpdatesIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -119,6 +133,13 @@ export default function PresentationView({
       }
     };
     fetchSlides();
+    
+    // ✅ Réinitialiser la notification en attente quand on revient sur cet onglet
+    if (hasPendingNotification) {
+      console.log('🔔 Réinitialisation de la notification en attente');
+      setHasPendingNotification(false);
+      setPendingNotificationCount(0);
+    }
   }, []);
 
   // Fermer le menu si on clique en dehors
@@ -336,6 +357,21 @@ export default function PresentationView({
       console.log('✅ Slides sauvegardées avec succès !');
       toast.success(`${newSlides.length} slides importées depuis Figma !`);
       
+      // ✅ Fermer le panneau de progression après import
+      setTimeout(() => {
+        if (onShowImportProgressChange) {
+          onShowImportProgressChange(false);
+        }
+        // Réinitialiser les données de progression
+        setLocalProgressData({
+          total: 0,
+          current: 0,
+          importedSlides: [],
+        });
+        // ✅ Réinitialiser le flag pour permettre la prochaine détection d'ouvrir le panneau
+        setManuallyClosedPanel(false);
+      }, 1500); // Laisser 1.5s pour voir le message de succès
+      
       // Fermer le dialogue d'import
       setShowFigmaImport(false);
     } catch (error) {
@@ -425,6 +461,173 @@ export default function PresentationView({
       currentSlideName,
     }));
   };
+
+  // ✅ Importer uniquement les nouvelles slides détectées
+  const handleImportNewSlides = useCallback(async () => {
+    if (newSlidesDetected.length === 0) return;
+    
+    setIsImportingNewSlides(true);
+    
+    try {
+      const accessToken = await getFigmaToken();
+      if (!accessToken) {
+        toast.error('Token Figma manquant');
+        setIsImportingNewSlides(false);
+        return;
+      }
+      
+      // Récupérer le fileId et fileUrl depuis les slides existantes
+      const currentSlides = slidesRef.current;
+      const figmaSlide = currentSlides.find(s => s.figmaFileId && s.figmaFileUrl);
+      if (!figmaSlide || !figmaSlide.figmaFileId || !figmaSlide.figmaFileUrl) {
+        toast.error('Impossible de trouver le fichier Figma lié');
+        setIsImportingNewSlides(false);
+        return;
+      }
+      
+      const fileId = figmaSlide.figmaFileId;
+      const fileUrl = figmaSlide.figmaFileUrl;
+      
+      // ✅ Filtrer uniquement les slides sélectionnées
+      const slidesToImport = newSlidesDetected.filter(slide => selectedSlideIds.has(slide.id));
+      
+      if (slidesToImport.length === 0) {
+        toast.error('Aucune slide sélectionnée pour l\'import');
+        setIsImportingNewSlides(false);
+        return;
+      }
+      
+      // Initialiser la progression
+      handleImportStart(slidesToImport.length, fileUrl);
+      
+      console.log(`🔄 Import de ${slidesToImport.length} slide(s) sélectionnée(s)...`);
+      
+      // Importer chaque slide sélectionnée individuellement (progressif)
+      for (const newSlide of slidesToImport) {
+        try {
+          handleProgressUpdate(newSlide.name);
+          
+          const slideData = await syncSingleSlide(
+            fileId,
+            newSlide.id,
+            accessToken
+          );
+          
+          if (slideData) {
+            // Ajouter la slide progressivement
+            await handleSlideImported(slideData, fileUrl);
+          }
+        } catch (error) {
+          console.error(`Erreur lors de l'import de "${newSlide.name}":`, error);
+          toast.error(`Erreur lors de l'import de "${newSlide.name}"`);
+        }
+      }
+      
+      // Fermer l'alerte et réinitialiser
+      setNewSlidesDetected([]);
+      setSelectedSlideIds(new Set());
+      setHasPendingNotification(false); // ✅ Réinitialiser la notification après import
+      setPendingNotificationCount(0);
+      toast.success(`${slidesToImport.length} slide(s) importée(s) !`);
+      
+      // ✅ Fermer le panneau de progression après import
+      setTimeout(() => {
+        if (onShowImportProgressChange) {
+          onShowImportProgressChange(false);
+        }
+        // Réinitialiser les données de progression
+        setLocalProgressData({
+          total: 0,
+          current: 0,
+          importedSlides: [],
+        });
+        // ✅ Réinitialiser le flag pour permettre la prochaine détection d'ouvrir le panneau
+        setManuallyClosedPanel(false);
+        
+        // ✅ Retirer les slides importées de la liste des slides ignorées
+        newSlidesDetected.forEach(slide => {
+          if (selectedSlideIds.has(slide.id)) {
+            ignoredSlidesRef.current.delete(slide.id);
+          }
+        });
+      }, 1500); // Laisser 1.5s pour voir le message de succès
+      
+      // Revérifier les mises à jour après import
+      setTimeout(() => checkForUpdates(true), 2000);
+      
+    } catch (error) {
+      console.error('Erreur lors de l\'import des nouvelles slides:', error);
+      toast.error('Erreur lors de l\'import des nouvelles slides');
+    } finally {
+      setIsImportingNewSlides(false);
+    }
+  }, [newSlidesDetected, selectedSlideIds, handleImportStart, handleProgressUpdate, handleSlideImported]);
+  
+  // ✅ Callbacks pour gérer la sélection des slides
+  const handleToggleSlideSelection = useCallback((slideId: string) => {
+    setSelectedSlideIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(slideId)) {
+        newSet.delete(slideId);
+      } else {
+        newSet.add(slideId);
+      }
+      return newSet;
+    });
+  }, []);
+  
+  const handleSelectAllSlides = useCallback(() => {
+    setSelectedSlideIds(new Set(newSlidesDetected.map(s => s.id)));
+  }, [newSlidesDetected]);
+  
+  const handleDeselectAllSlides = useCallback(() => {
+    setSelectedSlideIds(new Set());
+  }, []);
+  
+  // ✅ Callback pour ignorer les nouvelles slides détectées (fermeture manuelle du panneau)
+  const handleDismissNewSlides = useCallback(() => {
+    console.log('🚫 L\'utilisateur a ignoré les nouvelles slides détectées');
+    
+    // ✅ Ajouter les slides détectées à la liste des slides ignorées
+    newSlidesDetected.forEach(slide => {
+      ignoredSlidesRef.current.add(slide.id);
+    });
+    console.log(`📋 ${ignoredSlidesRef.current.size} slide(s) ignorée(s) au total`);
+    
+    setNewSlidesDetected([]);
+    setSelectedSlideIds(new Set());
+    setManuallyClosedPanel(true); // Empêcher la réouverture automatique
+    // ✅ Ne pas réinitialiser hasPendingNotification ici - il sera réinitialisé quand on revient sur l'onglet
+  }, [newSlidesDetected]);
+  
+  // ✅ Remonter les informations sur les nouvelles slides au parent
+  useEffect(() => {
+    if (onNewSlidesInfoChange) {
+      // ✅ Afficher la notification tant qu'il y a :
+      // - des nouvelles slides détectées OU
+      // - une notification en attente OU
+      // - des modifications détectées sur des slides existantes
+      const hasNotification = newSlidesDetected.length > 0 || hasPendingNotification || hasUpdates;
+      
+      if (hasNotification) {
+        // Calculer le nombre total de changements
+        const totalChanges = (newSlidesDetected.length > 0 ? newSlidesDetected.length : pendingNotificationCount) + modifiedSlideIds.size;
+        
+        onNewSlidesInfoChange({
+          newSlides: newSlidesDetected.length > 0 ? newSlidesDetected : [{ id: 'pending', name: `${totalChanges} mise(s) à jour` }],
+          selectedSlideIds,
+          onImport: handleImportNewSlides,
+          isImporting: isImportingNewSlides,
+          onToggleSlide: handleToggleSlideSelection,
+          onSelectAll: handleSelectAllSlides,
+          onDeselectAll: handleDeselectAllSlides,
+          onDismiss: handleDismissNewSlides, // ✅ Ajouter le callback de fermeture
+        });
+      } else {
+        onNewSlidesInfoChange(null);
+      }
+    }
+  }, [newSlidesDetected, selectedSlideIds, isImportingNewSlides, handleImportNewSlides, handleToggleSlideSelection, handleSelectAllSlides, handleDeselectAllSlides, handleDismissNewSlides, onNewSlidesInfoChange, hasPendingNotification, pendingNotificationCount, hasUpdates, modifiedSlideIds]);
 
   // Synchroniser les slides depuis Figma
   const handleSyncFromFigma = async () => {
@@ -753,6 +956,11 @@ export default function PresentationView({
         
         if (modifiedIds.size > 0) {
           console.log(`✨ ${modifiedIds.size} slide(s) modifiée(s):`, Array.from(modifiedIds));
+          // ✅ Activer aussi la notification persistante pour les mises à jour
+          if (!hasPendingNotification) {
+            setHasPendingNotification(true);
+            setPendingNotificationCount(modifiedIds.size);
+          }
           // Log détaillé des slides modifiées
           modifiedIds.forEach(frameId => {
             const slide = currentSlides.find(s => s.figmaFrameId === frameId);
@@ -767,6 +975,79 @@ export default function PresentationView({
         // Si aucune slide n'a de hash, on ne peut pas détecter de modifications
         setHasUpdates(false);
         setModifiedSlideIds(new Set());
+      }
+      
+      // ✅ Détecter les nouvelles slides ajoutées dans Figma
+      try {
+        const newSlides = await detectNewSlidesInFigma(
+          figmaSlide.figmaFileId,
+          accessToken,
+          currentSlides
+        );
+        
+        if (newSlides.length > 0) {
+          console.log(`✨ ${newSlides.length} nouvelle(s) slide(s) détectée(s):`, newSlides.map(s => s.name));
+          
+          // ✅ Marquer les slides qui ont été ignorées précédemment
+          const slidesWithIgnoreFlag = newSlides.map(slide => ({
+            ...slide,
+            previouslyIgnored: ignoredSlidesRef.current.has(slide.id)
+          }));
+          
+          const ignoredSlides = slidesWithIgnoreFlag.filter(s => s.previouslyIgnored);
+          const reallyNewSlides = slidesWithIgnoreFlag.filter(s => !s.previouslyIgnored);
+          
+          if (ignoredSlides.length > 0) {
+            console.log(`⚠️ ${ignoredSlides.length} slide(s) ignorée(s) précédemment:`, ignoredSlides.map(s => s.name));
+          }
+          if (reallyNewSlides.length > 0) {
+            console.log(`🆕 ${reallyNewSlides.length} vraiment nouvelle(s) slide(s):`, reallyNewSlides.map(s => s.name));
+          }
+          
+          // ✅ Vérifier si ce sont de vraiment nouvelles slides (différentes des précédentes)
+          const newSlideIds = new Set(newSlides.map(s => s.id));
+          const hasNewDifferentSlides = !Array.from(newSlideIds).every(id => previousNewSlidesRef.current.has(id)) 
+            || newSlideIds.size !== previousNewSlidesRef.current.size;
+          
+          setNewSlidesDetected(slidesWithIgnoreFlag);
+          
+          // ✅ Sélectionner toutes les slides par défaut (sauf celles ignorées précédemment)
+          const slideIdsToSelect = slidesWithIgnoreFlag
+            .filter(s => !s.previouslyIgnored)
+            .map(s => s.id);
+          setSelectedSlideIds(new Set(slideIdsToSelect));
+          
+          // ✅ Si ce sont de vraiment nouvelles slides, réinitialiser le flag
+          if (hasNewDifferentSlides) {
+            console.log('🆕 Ce sont de vraiment nouvelles slides, réinitialisation du flag');
+            setManuallyClosedPanel(false);
+            previousNewSlidesRef.current = newSlideIds;
+          }
+          
+          // ✅ Activer la notification persistante
+          setHasPendingNotification(true);
+          setPendingNotificationCount(newSlides.length);
+          
+          // ✅ N'afficher le panneau QUE s'il n'a pas été fermé manuellement
+          if (onShowImportProgressChange && !silent && !manuallyClosedPanel) {
+            onShowImportProgressChange(true);
+          }
+          
+          if (!silent) {
+            toast.info(`✨ ${newSlides.length} nouvelle(s) slide(s) disponible(s) dans Figma`, {
+              description: 'Consultez le panneau en bas à droite pour les importer'
+            });
+          }
+        } else {
+          setNewSlidesDetected([]);
+          setSelectedSlideIds(new Set());
+          setHasPendingNotification(false); // ✅ Pas de nouvelles slides = pas de notification
+          setPendingNotificationCount(0);
+          previousNewSlidesRef.current = new Set(); // Réinitialiser aussi la référence
+        }
+      } catch (error) {
+        console.error('Erreur lors de la détection des nouvelles slides:', error);
+        // Ne pas bloquer si la détection échoue
       }
       
       setLastCheckTime(new Date());
@@ -1245,8 +1526,8 @@ export default function PresentationView({
                   
                   <div className="p-2 bg-white border-t border-[var(--border)]">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-[var(--foreground)] truncate flex-1" style={{ fontSize: 'var(--text-xs)' }}>
-                        Slide {index + 1}
+                      <p className="text-[var(--foreground)] truncate flex-1" style={{ fontSize: 'var(--text-xs)' }} title={slide.name}>
+                        {slide.name}
                       </p>
                       
                       {/* Indicateur de statut Figma */}

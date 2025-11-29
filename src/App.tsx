@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Tabs, TabsContent } from './components/ui/tabs';
 import { ProtocolView } from './components/ProtocolView';
 import { TestSession } from './components/TestSession';
@@ -36,6 +36,18 @@ export default function App() {
     current: 0,
     importedSlides: [],
   });
+  
+  // ✅ État pour les nouvelles slides détectées (global) - exposé via callback
+  const [newSlidesInfo, setNewSlidesInfo] = useState<{
+    newSlides: Array<{ id: string; name: string; previouslyIgnored?: boolean }>;
+    selectedSlideIds: Set<string>;
+    onImport: () => void;
+    isImporting: boolean;
+    onToggleSlide: (slideId: string) => void;
+    onSelectAll: () => void;
+    onDeselectAll: () => void;
+    onDismiss: () => void; // ✅ Ajout du callback de fermeture
+  } | null>(null);
 
   // Mock tests list (prêt pour le multi-test)
   const tests = [
@@ -210,7 +222,7 @@ export default function App() {
             title={sidebarCollapsed ? 'Protocole' : ''}
           >
             {sidebarCollapsed ? (
-              <ClipboardList className="w-5 h-5" />
+              <ClipboardList className="w-4 h-4" />
             ) : (
               <div className="flex items-center gap-2.5">
                 <ClipboardList className="w-4 h-4 flex-shrink-0" />
@@ -230,7 +242,7 @@ export default function App() {
               title={sidebarCollapsed ? 'Session' : ''}
             >
               {sidebarCollapsed ? (
-                <PlayCircle className="w-5 h-5" />
+                <PlayCircle className="w-4 h-4" />
               ) : (
                 <div className="flex items-center gap-2.5">
                   <PlayCircle className="w-4 h-4 flex-shrink-0" />
@@ -250,7 +262,7 @@ export default function App() {
             title={sidebarCollapsed ? 'Résultats' : ''}
           >
             {sidebarCollapsed ? (
-              <BarChart3 className="w-5 h-5" />
+              <BarChart3 className="w-4 h-4" />
             ) : (
               <div className="flex items-center gap-2.5">
                 <BarChart3 className="w-4 h-4 flex-shrink-0" />
@@ -261,7 +273,7 @@ export default function App() {
 
           <button
             onClick={() => setActiveTab('presentation')}
-            className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all ${
+            className={`w-full text-left px-3 py-2.5 rounded-[var(--radius-md)] transition-all relative ${
               activeTab === 'presentation'
                 ? 'bg-[var(--accent)] text-white shadow-md'
                 : 'text-sidebar-foreground hover:bg-sidebar-accent'
@@ -269,11 +281,45 @@ export default function App() {
             title={sidebarCollapsed ? 'Présentation' : ''}
           >
             {sidebarCollapsed ? (
-              <Presentation className="w-5 h-5" />
+              <div className="relative">
+                <Presentation className="w-4 h-4" />
+                {/* Pastille de notification pour nouvelles slides */}
+                {newSlidesInfo && activeTab !== 'presentation' && (
+                  <span 
+                    className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-warning rounded-full animate-pulse"
+                    style={{ 
+                      boxShadow: '0 0 0 2px var(--sidebar)',
+                    }}
+                  />
+                )}
+              </div>
             ) : (
               <div className="flex items-center gap-2.5">
-                <Presentation className="w-4 h-4 flex-shrink-0" />
+                <div className="relative">
+                  <Presentation className="w-4 h-4 flex-shrink-0" />
+                  {/* Pastille de notification pour nouvelles slides */}
+                  {newSlidesInfo && activeTab !== 'presentation' && (
+                    <span 
+                      className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-warning rounded-full animate-pulse"
+                      style={{ 
+                        boxShadow: '0 0 0 2px var(--sidebar)',
+                      }}
+                    />
+                  )}
+                </div>
                 <span style={{ fontSize: 'var(--text-sm)' }}>Présentation</span>
+                {/* Badge avec le nombre de nouvelles slides */}
+                {newSlidesInfo && activeTab !== 'presentation' && (
+                  <span 
+                    className="ml-auto px-1.5 py-0.5 bg-warning text-white rounded-full"
+                    style={{ 
+                      fontSize: 'var(--text-xs)',
+                      fontWeight: 'var(--font-weight-medium)',
+                    }}
+                  >
+                    {newSlidesInfo.newSlides?.length || 0}
+                  </span>
+                )}
               </div>
             )}
           </button>
@@ -427,6 +473,7 @@ export default function App() {
                 isReadOnly={userRole === 'viewer'}
                 onImportProgressChange={setImportProgressData}
                 onShowImportProgressChange={setShowImportProgress}
+                onNewSlidesInfoChange={setNewSlidesInfo}
               />
             </TabsContent>
           </Tabs>
@@ -443,11 +490,25 @@ export default function App() {
           current={importProgressData.current}
           currentSlideName={importProgressData.currentSlideName}
           importedSlides={importProgressData.importedSlides}
-          onClose={() => setShowImportProgress(false)}
+          onClose={() => {
+            setShowImportProgress(false);
+            // ✅ Appeler le callback de dismiss pour vider les nouvelles slides dans PresentationView
+            if (newSlidesInfo?.onDismiss) {
+              newSlidesInfo.onDismiss();
+            }
+          }}
           onGoToSlides={() => {
             setActiveTab('presentation');
             setShowImportProgress(false);
           }}
+          newSlidesDetected={newSlidesInfo?.newSlides}
+          selectedSlideIds={newSlidesInfo?.selectedSlideIds}
+          onImportNewSlides={newSlidesInfo?.onImport}
+          isImportingNewSlides={newSlidesInfo?.isImporting}
+          onToggleSlide={newSlidesInfo?.onToggleSlide}
+          onSelectAll={newSlidesInfo?.onSelectAll}
+          onDeselectAll={newSlidesInfo?.onDeselectAll}
+          onDismiss={newSlidesInfo?.onDismiss}
         />
       )}
     </div>
